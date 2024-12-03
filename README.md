@@ -22,3 +22,5 @@ Aspirations:
 Dock mode
 Save States
 Save per game Config
+
+- Note: on my machine (AMD Ryzen 7 5800X) I have to restrict Quartus to a single core (set_global_assignment -name NUM_PARALLEL_PROCESSORS 1) otherwise it crashes with Access Violation errors.  Annonying as it takes longer to build but I'm using v18.1 as per the APF framework so maybe it's a big buggy running on multiple cores).
