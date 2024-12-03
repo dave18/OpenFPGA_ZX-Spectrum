@@ -478,13 +478,21 @@ wire [15:0] reg_DE  = cpu_reg[111:96];
 wire  [7:0] reg_A   = cpu_reg[7:0];
 
 reg pause_z80_req;
+reg pause_z80;
+initial begin
+	pause_z80<=0;
+	pause_z80_req<=0;
+end
+always @(posedge ce_cpu_p) begin
+	pause_z80<=pause_z80_req;	//set pause z80 when cpu clk is high and req is asserted
+end
 
 T80pa cpu
 (
 	.RESET_n(~reset),
 	.CLK(clk_sys),
-	.CEN_p(ce_cpu_p | pause_z80_req),
-	.CEN_n(ce_cpu_n & ~pause_z80_req),
+	.CEN_p(ce_cpu_p | pause_z80),
+	.CEN_n(ce_cpu_n & ~pause_z80),
 	//.WAIT_n(mmc_ready),
 	.WAIT_n(1'b1),
 	.INT_n(nINT),
@@ -2449,8 +2457,8 @@ end*/
 
   // Buffer audio to have better fitting on audio route
   always @(posedge clk_aud) begin
-    audio_buffer_l <= audio_l;
-	 audio_buffer_r <= audio_r;
+    audio_buffer_l <= pause_z80?16'h0:audio_l;
+	 audio_buffer_r <= pause_z80?16'h0:audio_r;
   end
 
   audio_mixer #(
