@@ -6,7 +6,7 @@ Original here https://github.com/MiSTer-devel/ZX-Spectrum_MISTer.git
 Core requires the file boot.rom to be copied to Assets\zxspectrum\dave18.ZXSpectrum\boot.rom.  This is a consolidated rom file and is not provided. Please see original MiSTer readme for boot.rom structure.
 
 v0.2.0-alpha
-Improved puase function (aligns with rising edge of cpu clock to avoide (hopefully) crashes).  Sound is muted when paused.
+Improved pause function (aligns with rising edge of cpu clock to avoid (hopefully) crashes).  Sound is muted when paused.
 Sub-directories (Cores/Assets/Platforms) now start with capital letter
 Core name changed from 'ZX Spectrum 48K' to 'X Spectrum'
 
