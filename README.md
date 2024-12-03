@@ -1,6 +1,10 @@
 # OpenFPGA_ZX-Spectrum
 OpenFPGA Port of the MiSTER Spectrum Core to Analogue Pocket
 
+Original here https://github.com/MiSTer-devel/ZX-Spectrum_MISTer.git
+
+See original readme for boot.rom structure.
+
 v0.1.0-alpha
 All hardware features implemented except disk drives and DivMMC
 - Note: I haven't tested General Sound as I haven't yet found a non-TRD file that uses it!
