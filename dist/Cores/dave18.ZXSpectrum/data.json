@@ -46,13 +46,13 @@
         "parameters": 9,
         "filename": "",
         "extensions": ["tzx"]
-    },	
+    },
 	{
         "name": "ROM",
         "id": "0x200",
         "required": true,
         "deferload": true,
-        "parameters": 10,			
+        "parameters": 10,
         "filename": "boot.rom",
         "extensions": ["rom"],
         "address": "0x00000000"
