@@ -3,6 +3,7 @@
 
 typedef unsigned short uint16_t;
 typedef unsigned long uint32_t;
+//typedef unsigned long long uint64_t;
 typedef unsigned char uint8_t;
 
 //#define XDEBUG 1
@@ -26,6 +27,7 @@ typedef unsigned char uint8_t;
 #define IO_KB_ON 	0xE0
 #define IO_MENU_ON 	0xE4
 #define PAUSE_Z80	0xE8	//Pause the Z80 1=pause 0=run
+#define IO_DEBUG_ON	0xEC	//Pause the Z80 1=pause 0=run
 
 #define IO_JOYPAD 	0xF0
 #define IO_IOCTL_STATE 	0x800
@@ -130,6 +132,8 @@ typedef unsigned char uint8_t;
 #define IO_JOYK_9_6 	0x538
 #define IO_JOYK_9_7 	0x53C
 
+#define SEND_FKEYS	 	0x600
+
 
 
 
@@ -147,8 +151,31 @@ typedef unsigned char uint8_t;
 #define START		0x8000
 
 
-#define DATA_SLOTS_ADDRESS 0x40000000
-#define DATA_SLOTS(x) *(volatile unsigned int *)(DATA_SLOTS_ADDRESS+x)
+#define IOCTL 0x40000000
+#define IOCTL_RW(x) *(volatile unsigned int *)(IOCTL+x)
+#define SET_SIZE		0x00		//size to read/write
+#define SET_ADDR_U		0x04		//high 16 bits of offset address
+#define SET_ADDR_L		0x08		//low bits of offset address
+#define SET_ID			0x0c
+#define DOWNLOAD		0x10
+#define UPLOAD			0x14
+#define ROM_LOADED		0x18
+#define REQ_ACK			0x1c
+#define COMPLETE_ACK	0x20
+#define SET_INDEX		0x24
+#define DISK_BUFF_ADDR	0x100
+#define DISK_BUFF_RD	0x104
+#define DISK_BUFF_WR	0x108
+#define DISK_MOUNTED	0x10c  //bit 0 = mounted = bit 1 (0=RO 1=RW)
+#define DISK_SIZE_LOW	0x110
+#define DISK_SIZE_HIGH	0x114
+#define VHD_MOUNTED		0x118  //bit 0 = mounted = bit 1 (0=RO 1=RW)
+#define VHD_BUFF_ADDR	0x11c
+#define FNAME_ADDR		0x200
+#define FNAME_DATA		0x204
+#define FNAME_WRITE		0x208
+
+
 
 #define BRIDGE 0x50000000		
 #define BRIDGE_RW(x) *(volatile unsigned int *)(BRIDGE+x)

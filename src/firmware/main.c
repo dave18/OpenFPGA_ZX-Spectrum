@@ -11,7 +11,26 @@ int numitems=0;
 int cursorpos=0;
 int oldpos;
 int currmenu=0;
+int debug_on;
+int key_auto;
+int auto_kptr;
+int auto_delay;
+int cap_shift;
+int sym_shift;
 
+uint32_t status_bits[64];
+uint32_t status0;
+uint32_t status1;
+
+char filename[256];
+char ext[4];
+
+int ioctl_index;
+
+char make_upper(char c) {
+	if ((c>=0x61) && (c<=0x7a)) c-=0x20;
+	return c;
+}
 
 void * memset (void *dest, int val, unsigned int len)
 {
@@ -19,6 +38,19 @@ void * memset (void *dest, int val, unsigned int len)
   while (len-- > 0)
     *ptr++ = val;
   return dest;
+}
+
+int memcmp (const void *str1, const void *str2, unsigned int count)
+{
+  register const unsigned char *s1 = (const unsigned char*)str1;
+  register const unsigned char *s2 = (const unsigned char*)str2;
+
+  while (count-- > 0)
+    {
+      if (*s1++ != *s2++)
+	  return s1[-1] < s2[-1] ? -1 : 1;
+    }
+  return 0;
 }
 
 static uint32_t strlen(const char *src)
@@ -294,13 +326,11 @@ int writeMenu()
 		}
 		i++;
 		y+=8;
-	}
+	}	
 	return i;
 }
 
-uint32_t status_bits[64];
-uint32_t status0;
-uint32_t status1;
+
 void encode_status() {
 	
 /* status bits (as per MiSTer)
@@ -442,7 +472,30 @@ void decode_status() {
 
 
 
+/*
+bits 7-0
+id
 
+bits 15-8
+0 = HEADER
+1 = Sub Menu
+2 = List 
+3 = Yes/No
+4 = On/Off
+5 = Special (Map joystick)
+6 = Reset F Keys
+7 = Model F Keys
+9 = Reset
+
+bits 23 - 16
+num items in list
+
+bits 31 - 24
+list id or menu id
+
+
+
+*/
 void initMenus() {
 	strcpyr(&menuItems[0] [0] [0],"MAIN MENU");
 	strcpyr(&menuItems[0] [1] [0],"Audio & Video");
@@ -455,7 +508,9 @@ void initMenus() {
 	strcpyr(&menuItems[0] [8] [0],"Tape Sound:");
 	strcpyr(&menuItems[0] [9] [0],"CPU Speed:");
 	strcpyr(&menuItems[0] [10] [0],"Reset & Apply");
-	strcpyr(&menuItems[0] [11] [0],"END");
+	strcpyr(&menuItems[0] [11] [0],"Other Reset Options:");
+	strcpyr(&menuItems[0] [12] [0],"Quick Model Select:");
+	strcpyr(&menuItems[0] [13] [0],"END");
 	
 	menuType[0] [0] = 0x00000001;
 	menuType[0] [1] = 0x01000102;
@@ -496,7 +551,10 @@ void initMenus() {
 	
 	menuType[0] [10] = 0x0000090b;
 	
-	strcpyr(&menuItems[0] [11] [0],"END");
+	menuType[0] [11] = 0x03000102;
+	menuType[0] [12] = 0x04000103;
+	
+	strcpyr(&menuItems[0] [13] [0],"END");
 	
 	
 	strcpyr(&menuItems[1] [0] [0],"AUDIO & VIDEO");
@@ -616,7 +674,7 @@ void initMenus() {
 	strcpyr(&menuLists[0x12] [4] [0]," Spectrum +2A/+3");
 	menuListVals[0x12]=0;
 	
-	menuType[2] [7] = 0x13030228;
+	menuType[2] [7] = 0x13010228;
 	strcpyr(&menuLists[0x13] [0] [0],"   Auto (VHD)");
 	strcpyr(&menuLists[0x13] [1] [0],"SD Card 14MHz");
 	strcpyr(&menuLists[0x13] [2] [0],"SD Card 28MHz");
@@ -628,6 +686,43 @@ void initMenus() {
 	strcpyr(&menuLists[0x14] [2] [0],"        ZXMMC");
 	menuListVals[0x14]=0;
 	
+	strcpyr(&menuItems[3] [0] [0],"RESET OPTIONS");
+	strcpyr(&menuItems[3] [1] [0],"Warm Reset");
+	strcpyr(&menuItems[3] [2] [0],"Cold Reset (Disk unload)");
+	strcpyr(&menuItems[3] [3] [0],"Reset to ROM0 Menu");
+	strcpyr(&menuItems[3] [4] [0],"48K Basic Load (no lock)");
+	strcpyr(&menuItems[3] [5] [0],"48K Basic Load (lock)");
+	strcpyr(&menuItems[3] [6] [0],"Issue NMI");
+	strcpyr(&menuItems[3] [7] [0],"Enter Multiface");	
+	strcpyr(&menuItems[3] [8] [0],"END");
+	
+	menuType[3] [0] = 0x00000030;
+	menuType[3] [1] = 0x00000631;
+	menuType[3] [2] = 0x00000632;
+	menuType[3] [3] = 0x00000633;
+	menuType[3] [4] = 0x00000634;
+	menuType[3] [5] = 0x00000635;
+	menuType[3] [6] = 0x00000636;
+	menuType[3] [7] = 0x00000637;
+	
+	strcpyr(&menuItems[4] [0] [0],"MODEL SELECT");
+	strcpyr(&menuItems[4] [1] [0],"ZX Spectrum 48K");
+	strcpyr(&menuItems[4] [2] [0],"ZX Spectrum 128K");
+	strcpyr(&menuItems[4] [3] [0],"ZX Spectrum +3");
+	strcpyr(&menuItems[4] [4] [0],"Pentagon 48K");
+	strcpyr(&menuItems[4] [5] [0],"Pentagon 128K");
+	strcpyr(&menuItems[4] [6] [0],"Pentagon 1024K");
+	strcpyr(&menuItems[4] [7] [0],"END");
+	
+	menuType[4] [0] = 0x00000038;
+	menuType[4] [1] = 0x00000739;
+	menuType[4] [2] = 0x0000073a;
+	menuType[4] [3] = 0x0000073b;
+	menuType[4] [4] = 0x0000076c;
+	menuType[4] [5] = 0x0000073d;
+	menuType[4] [6] = 0x0000073e;
+	
+	
 	
 }
 
@@ -636,14 +731,21 @@ int kb_on;
 unsigned char kb_matrix [8];
 
 void drawKeyboard(int kx, int ky) {
+	int inv;
 	for (int y=0;y<5;y++) {
 		for (int x=0;x<14;x++) {
-			if ((y==ky) && (x==kx)) writeChar(keyboard[y] [x],(y+2)*16*osd_char_width+x+3,1); else writeChar(keyboard[y] [x],(y+2)*16*osd_char_width+x+3,0);
+			inv=0;
+			if ((y==ky) && (x==kx)) inv=1;
+			if ((y==3) && (x==0) && (cap_shift)) inv=1;
+			if ((y==3) && (x==1) && (cap_shift)) inv=1;
+			if ((y==3) && (x==12) && (cap_shift)) inv=1;
+			if ((y==3) && (x==13) && (cap_shift)) inv=1;
+			if ((y==4) && (x==0) && (sym_shift)) inv=1;
+			if ((y==4) && (x==13) && (sym_shift)) inv=1;
+			if (inv) writeChar(keyboard[y] [x],(y+2)*16*osd_char_width+x+3,1); else writeChar(keyboard[y] [x],(y+2)*16*osd_char_width+x+3,0);
 		}
 	}
 };
-
-
 
 int inputDelay=0;
 int pause_on;
@@ -714,6 +816,79 @@ void process_menu(uint32_t mask) {
 				writeMenu();			
 				updateCursor();
 			break;
+			//mod bits
+			//0 = RShift
+			//1 = Alt
+			//2 = Ctrl
+			//0x200 = F10
+			//0x400 = F11
+			case 6:		//reset fkey presses				
+				switch ((menuType[currmenu] [cursorpos]) & 0xff) {
+					case 0x31:
+						IO_RW(SEND_FKEYS)=0x40400;
+						menu_on=0;
+					break;
+					case 0x32:
+						IO_RW(SEND_FKEYS)=0x20400;
+						menu_on=0;
+					break;
+					case 0x33:
+						IO_RW(SEND_FKEYS)=0x60400;
+						menu_on=0;
+					break;
+					case 0x34:
+						IO_RW(SEND_FKEYS)=0x00200;
+						key_auto=1;
+						auto_kptr=0;
+						kb_on=0;
+						menu_on=0;
+						auto_delay=AUTO_KEY_DELAY;
+					break;
+					case 0x35:
+						IO_RW(SEND_FKEYS)=0x10200;
+						key_auto=1;
+						auto_kptr=0;
+						kb_on=0;
+						menu_on=0;
+						auto_delay=AUTO_KEY_DELAY;
+					break;
+					case 0x36:
+						IO_RW(SEND_FKEYS)=0x00400;
+						menu_on=0;
+					break;
+					case 0x37:
+						IO_RW(SEND_FKEYS)=0x10400;
+						menu_on=0;
+					break;
+				}
+				menu_on=0;
+				IO_RW(IO_MENU_ON)=menu_on;
+				IO_RW(IO_KB_ON)=key_auto<<1 | kb_on;
+			break;
+			case 7:		//model change fkey presses				
+				switch ((menuType[currmenu] [cursorpos]) & 0xff) {
+					case 0x39:
+						IO_RW(SEND_FKEYS)=0x20001;
+					break;
+					case 0x3a:
+						IO_RW(SEND_FKEYS)=0x20002;
+					break;
+					case 0x3b:
+						IO_RW(SEND_FKEYS)=0x20004;
+					break;
+					case 0x3c:
+						IO_RW(SEND_FKEYS)=0x20008;
+					break;
+					case 0x3d:
+						IO_RW(SEND_FKEYS)=0x20010;
+					break;
+					case 0x3e:
+						IO_RW(SEND_FKEYS)=0x20020;						
+					break;									
+				}
+				menu_on=0;
+				IO_RW(IO_MENU_ON)=menu_on;
+			break;
 		}
 		encode_status();
 		
@@ -744,10 +919,44 @@ void process_menu(uint32_t mask) {
 	
 }
 
+
+
 void clearKeyboardMatrix() {
 	for (int r=0;r<8;r++) {			//reset keyboard rows
 		kb_matrix[r]=0xff;			
 	}
+	//if (cap_shift) kb_matrix[0]=0xfe;	//shift							
+	//if (sym_shift) kb_matrix[7]=0xfd;	//shift							
+}
+
+
+
+void setKeyboardModifier(int kx,int ky) {
+			switch (ky) {		//set bitmask based on key												
+				case 3:			//cap shift extend z x c v b n m up cap shift
+					switch (kx) {
+						case 0:		//caps shift
+						case 1:
+							cap_shift=1-cap_shift;
+						break;						
+						case 12:	//cap shift
+						case 13:					
+							cap_shift=1-cap_shift;
+						break;						
+					}
+				break;
+				case 4:			//sym shift ; " , . space left down right sym shift
+					switch (kx) {
+						case 0:		//sym shift
+							sym_shift=1-sym_shift;
+						break;						
+						case 13: //sym shift
+							sym_shift=1-sym_shift;
+						break;						
+					}
+				break;
+			}
+			
 }
 
 
@@ -973,6 +1182,10 @@ void setKeyboardMatrix(int kx,int ky) {
 						break;						
 					}
 				break;
+			}			
+			if (kb_on) {
+				if (cap_shift) kb_matrix[0]&=0xfe;	//shift							
+				if (sym_shift) kb_matrix[7]&=0xfd;	//shift							
 			}
 			
 }
@@ -983,7 +1196,10 @@ void processInput()
 	uint32_t mask=readJoypad();		
 	if (mask==0) joyclear=1; 	//debounce
 	int kb_press;
+	int mod_press;
 	if (inputDelay) inputDelay--;
+	
+	IO_RW(SEND_FKEYS)=0x0;
 	
 	
 	if ((mask & L_TRIG) && (mask & START) && (joyclear==1))	{
@@ -991,6 +1207,17 @@ void processInput()
 		IO_RW(PAUSE_Z80)=pause_on;
 		joyclear=0;		
 	}
+	
+	//mod bits
+	//0 = RShift
+	//1 = Alt
+	//2 = Ctrl
+	if ((mask & L_TRIG) && (mask & SELECT) && (joyclear==1))	{		
+		IO_RW(SEND_FKEYS)=0x00400;
+		joyclear=0;		
+	}// else {IO_RW(SEND_FKEYS)=0x0;};
+	
+	
 	
 	//if ((mask & START) && (!(mask & L_TRIG)) && (joyclear==1))	{
 	if ((mask & START) && (joyclear==1))	{
@@ -1015,6 +1242,7 @@ void processInput()
 		if (kb_on) {
 			kb_on=0;
 			IO_RW(IO_KB_ON)=0;
+			//clearOSD(0);
 		}
 		else {
 			menu_on=0; 
@@ -1028,7 +1256,8 @@ void processInput()
 		joyclear=0;
 	}
 	
-	if (kb_on) {		
+	//if ((kb_on) || (key_auto)) {		
+	if (kb_on | key_auto) {		
 		if (inputDelay==0) {
 		if (mask) inputDelay=delaysize;
 		
@@ -1048,8 +1277,9 @@ void processInput()
 		}
 		
 		if (mask & FACE_A) {kb_press=1;} else {kb_press=0;}
+		if (mask & FACE_X) {mod_press=1;} else {mod_press=0;}
 		
-		clearKeyboardMatrix();
+		if (kb_on) clearKeyboardMatrix();
 		
 		/*keyboard_matrix is
 		row 0 - SHIFT Z X C V
@@ -1063,6 +1293,23 @@ void processInput()
 		*/
 		
 		if (kb_press) setKeyboardMatrix(kbx,kby);
+		if (mod_press) setKeyboardModifier(kbx,kby);
+		if (key_auto) {
+			if (auto_delay) {
+				auto_delay--;
+			}
+			else
+			{
+				if (auto_key[auto_kptr] [0]<255) {setKeyboardMatrix(auto_key[auto_kptr] [0],auto_key[auto_kptr] [1]);} else {clearKeyboardMatrix();}
+				auto_kptr++;
+				auto_delay=AUTO_KEY_REPEAT;
+				if (auto_kptr==AUTO_KEY_MAX) {
+					//auto_kptr=0;
+					key_auto=0;
+					IO_RW(IO_KB_ON)=kb_on;
+				}
+			}
+		}
 
 		IO_RW(IO_KEYB_0)=kb_matrix[0];
 		IO_RW(IO_KEYB_1)=kb_matrix[1];
@@ -1074,7 +1321,7 @@ void processInput()
 		IO_RW(IO_KEYB_7)=kb_matrix[7];
 		}
 				
-	drawKeyboard(kbx,kby);
+	if (kb_on) drawKeyboard(kbx,kby);
 	}
 	
 	
@@ -1251,21 +1498,96 @@ void mapJoystick() {
 }
 
 
+uint32_t dataslot_id;
+uint32_t dataslot_size_u;
+uint32_t dataslot_size_l;
+//uint64_t dataslot_size;
 
 
+int imageDSKMounted;
+int imageVHDMounted;
+uint32_t disk_type;		
+//uint32_t disk_size;
+uint32_t disk_rw;
+
+void readSector(unsigned int address, unsigned int size,unsigned int type) {	
+//	if (size>512) return;	//max supported sector size is 512 bytes
+	//if (address+size > disk_size) return;	//sector request beyond disk size limit
+	
+	IOCTL_RW(COMPLETE_ACK)=0;
+	IOCTL_RW(SET_SIZE)=size;
+	if (address>=0x80000) {
+		IOCTL_RW(SET_ADDR_L)=(address-0x80000)*0x200;
+		IOCTL_RW(SET_ADDR_U)=(address >> 23);
+	} else {
+		IOCTL_RW(SET_ADDR_L)=address*0x200;
+		IOCTL_RW(SET_ADDR_U)=0x0;
+	}
+	
+	IOCTL_RW(SET_ID)=type;
+	IOCTL_RW(DOWNLOAD)=1;
+	
+	while (IOCTL_RW(COMPLETE_ACK)==0) {	//wait until download finishes		
+	}
+	IOCTL_RW(DOWNLOAD)=0;	
+	IOCTL_RW(COMPLETE_ACK)=1;
+}
+
+void mountDSK() {
+
+//	if ((dataslot_size_l<0x100) && (dataslot_size_u==0)) return;		//file too small
+	
+	imageDSKMounted=1;
+	disk_rw=1;
+	//disk_size=dataslot_size_l;
+	disk_type=dataslot_id;
+	
+
+	IOCTL_RW(DISK_SIZE_LOW)=dataslot_size_l;
+	IOCTL_RW(DISK_SIZE_HIGH)=dataslot_size_u;
+	IOCTL_RW(DISK_MOUNTED)=((disk_rw<<1) & 2) + (imageDSKMounted & 1);
+	IOCTL_RW(DISK_MOUNTED)=0;		//Mount signal is just pulsed, not continually asserted
+		
+}
+
+void mountVHD() {
+
+//	if ((dataslot_size_l<0x100) && (dataslot_size_u==0)) return;		//file too small
+
+	imageVHDMounted=1;
+	disk_rw=1;
+	//disk_size=dataslot_size_l;
+	disk_type=dataslot_id;
+	
+	IOCTL_RW(DISK_SIZE_LOW)=dataslot_size_l;
+	IOCTL_RW(DISK_SIZE_HIGH)=dataslot_size_u;
+	IOCTL_RW(VHD_MOUNTED)=((disk_rw<<1) & 2) + (imageVHDMounted & 1);
+	IOCTL_RW(VHD_MOUNTED)=0;		//Mount signal is just pulsed, not continually asserted
+}
 
 
 //Note - external IO is 32 bit
 int main(void)
 {
+	debug_on=0;
+	filename[0]=0;
+	ext[0]=0;
+	
+	initMenus();	
+	encode_status();
+	//hold core in init_reset	
+	IO_RW(IO_STATUS1)=status1;
+	status0 |= 1;	//set reset flag
+	IO_RW(IO_STATUS0)=status0;		
+	IOCTL_RW(ROM_LOADED)=0;
+	
 	pause_on=0;
 	setOSDSize(256,128);
 	clearOSD(0);
 	
 	drawBorder();
 	
-	initMenus();	
-	encode_status();
+	
 	
 	currmenu=0;
 	numitems=writeMenu();
@@ -1273,7 +1595,7 @@ int main(void)
 	oldpos=1;
 	updateCursor();
 	menu_on=0;
-	IO_RW(IO_MENU_ON)=0;
+	IO_RW(IO_MENU_ON)=menu_on;
 	
 	kbx=0;
 	kby=0;
@@ -1436,23 +1758,175 @@ int main(void)
 	
 	
 	kb_on=0;
-	IO_RW(IO_KB_ON)=0;
+	IO_RW(IO_KB_ON)=kb_on;
+	IO_RW(SEND_FKEYS)=0x0;
 	
-	int y=0;
+	imageDSKMounted=0;
+	IOCTL_RW(DISK_MOUNTED)=0;
+	imageVHDMounted=0;
+	IOCTL_RW(VHD_MOUNTED)=0;
+	
+	//int y=0;
+	
+	//load the ROM into memory
+	IOCTL_RW(COMPLETE_ACK)=0;
+	IOCTL_RW(SET_SIZE)=0x34000;
+	IOCTL_RW(SET_ADDR_U)=0x0;
+	IOCTL_RW(SET_ADDR_L)=0x0;
+	IOCTL_RW(SET_ID)=0x200;
+	IOCTL_RW(DOWNLOAD)=1;
+	
+	while (IOCTL_RW(COMPLETE_ACK)==0) {	//wait until download finishes		
+	}
+	IOCTL_RW(DOWNLOAD)=0;
+	IOCTL_RW(ROM_LOADED)=1;
+	IOCTL_RW(COMPLETE_ACK)=1;
 	
 	//bring core out of init_reset	
-	IO_RW(IO_STATUS1)=status1;
-	status0 |= 1;	//set reset flag
-	IO_RW(IO_STATUS0)=status0;			
 	status0 &= 0xfffffffe;	//clear reset flag
 	IO_RW(IO_STATUS0)=status0;			
 	
 	
 	while(1)
 	{	
+		if (IOCTL_RW(REQ_ACK)==1) {		//Core has loaded a dataslot
+			
+			IOCTL_RW(REQ_ACK)=1;		//Acknowledge dataslot change
+			IOCTL_RW(COMPLETE_ACK)=0;		//reset download complete ackknowledge
+			dataslot_id=IOCTL_RW(SET_ID);			//read in datalot_id
+			dataslot_size_u=IOCTL_RW(SET_ADDR_U);		//read in top 16 bits of file size
+			dataslot_size_l=IOCTL_RW(SET_ADDR_L);		//read in lower 32 bits of file size
+			//dataslot_size=((uint_64t)dataslot_size_u<<32) | dataslot_size_l;
+			
+			//first we need to load in the filename
+			//so we can access cfg files (not for VHD images though)
+			if (dataslot_id!=3) {
+				IOCTL_RW(SET_ADDR_L)=0xFFFFFFFF;			//address FFFFFFFF signals filename load
+				IOCTL_RW(SET_ADDR_U)=0x0;			//address FFFFFFFF signals filename load
+				IOCTL_RW(SET_ID)=dataslot_id;
+				IOCTL_RW(DOWNLOAD)=1;	
+	
+				while (IOCTL_RW(COMPLETE_ACK)==0) {	//wait until download finishes			
+				}
+	
+				IOCTL_RW(DOWNLOAD)=0;	//Turn off download request
+				IOCTL_RW(COMPLETE_ACK)=1;	//Acknowledge load complete
+				
+				unsigned int data;
+				int i;
+				for (i=0;i<64;i++) {
+					IOCTL_RW(FNAME_ADDR)=i;
+					data=IOCTL_RW(FNAME_DATA);
+					filename[i*4]=(char) data & 0xff;
+					filename[i*4+1]=(char) (data >> 8) & 0xff;
+					filename[i*4+2]=(char) (data >> 16) & 0xff;
+					filename[i*4+3]=(char) (data >> 24) & 0xff;				
+				}
+				
+				i=strlen(filename);
+				if (i>4) {				//*.xxx  to have a valid extension filename length must be greater than 4 chars
+					ext[0]=make_upper(filename[i-3]);
+					ext[1]=make_upper(filename[i-2]);
+					ext[2]=make_upper(filename[i-1]);
+					ext[3]=0;
+					filename[i-3]='c';		//now replace the extension with 'cfg'
+					filename[i-2]='f';
+					filename[i-1]='g';
+				}
+				
+				/*for (i=0;i<64;i++) {		//update memory with path to config file
+					IOCTL_RW(FNAME_ADDR)=i;					
+					data=filename[i*4] & 0xff;
+					data|=(filename[i*4+1] << 8) & 0xff;
+					data|=(filename[i*4+2] << 16) & 0xff;
+					data|=(filename[i*4+3] << 24) & 0xff;					
+					IOCTL_RW(FNAME_DATA)=data;
+					IOCTL_RW(FNAME_WRITE)=1;
+					IOCTL_RW(FNAME_WRITE)=0;
+				}
+				IOCTL_RW(FNAME_ADDR)=64;		//create if doesn't exist
+				IOCTL_RW(FNAME_DATA)=1;
+				IOCTL_RW(FNAME_WRITE)=1;
+				IOCTL_RW(FNAME_WRITE)=0;
+				
+				IOCTL_RW(SET_ADDR_L)=0xFFFFFFFE;			//address FFFFFFFF signals filename load
+				IOCTL_RW(SET_ADDR_U)=0x0;			//address FFFFFFFF signals filename load
+				IOCTL_RW(SET_ID)=0x400;
+				IOCTL_RW(SET_SIZE)=32;	
+				IOCTL_RW(UPLOAD)=1;	
+				
+	
+				while (IOCTL_RW(COMPLETE_ACK)==0) {	//wait until download finishes			
+				}
+	
+				IOCTL_RW(UPLOAD)=0;	//Turn off download request
+				IOCTL_RW(COMPLETE_ACK)=1;	//Acknowledge load complete
+				*/
+			
+			}
+			
+			
+			
+			
+			IOCTL_RW(COMPLETE_ACK)=0;		//reset download complete ackknowledge			
+			switch (dataslot_id) {
+				case 1:			//Disk image
+					if (strcmp(ext,"TRD")==0) ioctl_index=0x00;
+					if (strcmp(ext,"IMG")==0) ioctl_index=0x40;
+					if (strcmp(ext,"DSK")==0) ioctl_index=0x80;
+					if (strcmp(ext,"MGT")==0) ioctl_index=0xC0;					
+					ioctl_index+=dataslot_id;
+					IOCTL_RW(SET_INDEX)=ioctl_index;
+					mountDSK();
+				break;
+				case 3:			//VHD image					
+					ioctl_index=dataslot_id;
+					IOCTL_RW (SET_INDEX)=ioctl_index;
+					mountVHD();
+				break;
+				default:   //tape/snapshots				
+				//load the file into memory
+					if (strcmp(ext,"TAP")==0) ioctl_index=0x00;
+					if (strcmp(ext,"CSW")==0) ioctl_index=0x40;
+					if (strcmp(ext,"TZX")==0) ioctl_index=0x80;
+					if (strcmp(ext,"Z80")==0) ioctl_index=0x00;
+					if (strcmp(ext,"SNA")==0) ioctl_index=0x40;
+					if (strcmp(ext,"VHD")==0) ioctl_index=0x00;										
+					ioctl_index+=dataslot_id;
+					IOCTL_RW(SET_INDEX)=ioctl_index;
+					IOCTL_RW(SET_SIZE)=dataslot_size_l;
+					IOCTL_RW(SET_ADDR_U)=0x0;
+					IOCTL_RW(SET_ADDR_L)=0x0;
+					IOCTL_RW(SET_ID)=dataslot_id;
+					IOCTL_RW(DOWNLOAD)=1;	
+					while (IOCTL_RW(COMPLETE_ACK)==0) {	//wait until download finishes		
+					}
+					IOCTL_RW(DOWNLOAD)=0;	//Turn off download request
+					IOCTL_RW(COMPLETE_ACK)=1;	//Acknowledge load complete
+				break;
+				
+			}
+			IOCTL_RW(REQ_ACK)=0;	//turn off new dataslot acknowledge
+			
+			
+			
+		}		
 		
+		if ((IOCTL_RW(DISK_BUFF_RD) & 1) && (imageDSKMounted)) {		//core has requested disk sector
+			readSector(IOCTL_RW(DISK_BUFF_ADDR),IOCTL_RW(DISK_SIZE_LOW),1);
+		}
+		if ((IOCTL_RW(DISK_BUFF_RD) & 2) && (imageVHDMounted)) {		//core has requested vhd sector
+			readSector(IOCTL_RW(VHD_BUFF_ADDR),IOCTL_RW(DISK_SIZE_LOW),3);
+		}
+
 		processInput();
 		
+		//high 32 bits - status [63:32]
+		//low 32 bit - MMC Ver, Vert Crop, Scale, Snow Bug,
+		//SPEED REQ, (24:22) CPU Speed
+		//GS, Joystick, Scandoubler, ULA+, Port #FF (21:13)
+		//ARCH (12:8) OR SNAP_HW (12:8) Status[12:8] - 12:10 - memory - 9:8 - Video Timings
+		//7:0
 		if (IO_RW(IO_STATUSC)) {		//Core has requested status change
 			status0=IO_RW(IO_STATUS0);
 			status1=IO_RW(IO_STATUS1);

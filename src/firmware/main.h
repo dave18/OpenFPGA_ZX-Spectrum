@@ -96,8 +96,8 @@ const char * gs[] ={
 
 void mapJoystick();
 
-#define MAXMENU 3
-#define MAXMENUITEM 12
+#define MAXMENU 5
+#define MAXMENUITEM 14
 #define MAXMENUITEMLEN 32
 
 #define MAXLISTIDS 21
@@ -107,6 +107,7 @@ void mapJoystick();
 #define TRUE_VID 2
 #define INV_VID 4
 #define ZX_BREAK 6
+#define ZX_EDIT 7
 #define ZX_DELETE 8
 #define CAPS_LOCK 10
 #define ZX_ENTER 12
@@ -121,11 +122,28 @@ void mapJoystick();
 #define ZX_SPACE 24
 
 const char keyboard[5] [14] = {
-	{ZX_BREAK,ZX_BREAK+1,'1','2','3','4','5','6','7','8','9','0',ZX_DELETE,ZX_DELETE+1},
+	{ZX_BREAK,ZX_EDIT,'1','2','3','4','5','6','7','8','9','0',ZX_DELETE,ZX_DELETE+1},
 	{TRUE_VID,TRUE_VID+1,INV_VID,INV_VID+1,'Q','W','E','R','T','Y','U','I','O','P'},
 	{CAPS_LOCK,CAPS_LOCK+1,ZX_GRAPH,'A','S','D','F','G','H','J','K','L',ZX_ENTER,ZX_ENTER+1},
 	{CAPS_SHIFT,CAPS_SHIFT+1,ZX_EXTEND,ZX_EXTEND+1,'Z','X','C','V','B','N','M',UP_ARROW,CAPS_SHIFT,CAPS_SHIFT+1},
 	{SYM_SHIFT,';','\"',',','.',ZX_SPACE,ZX_SPACE+1,ZX_SPACE+2,ZX_SPACE+3,ZX_SPACE+4,LEFT_ARROW,DOWN_ARROW,RIGHT_ARROW,SYM_SHIFT},
+};
+
+
+#define AUTO_KEY_MAX 9
+#define AUTO_KEY_DELAY 29000
+#define AUTO_KEY_REPEAT 2000
+
+const int auto_key[AUTO_KEY_MAX] [2] = {	
+	{255,255},
+	{9,2},		//J
+	{255,255},
+	{2,4},		//"
+	{255,255},
+	{2,4},		//"
+	{255,255},
+	{12,2},		//Enter
+	{255,255},
 };
 
 	
