@@ -14,6 +14,9 @@ set_clock_groups -asynchronous \
  -group { ic|mp1|mf_pllbase_inst|altera_pll_i|general[1].gpll~PLL_OUTPUT_COUNTER|divclk } 
 
  
+create_clock -name {core_top:ic|ULA:ULA|CPUClk} -period 17.857
+#create_clock -name {core_top:ic|ULA:ULA|CPUClk} -period 17.857 -waveform {0 8.929}
+ 
 set clk_sys {ic|mp1|mf_pllbase_inst|altera_pll_i|general[0].gpll~PLL_OUTPUT_COUNTER|divclk}
 set clk_56m {ic|mp1|mf_pllbase_inst|altera_pll_i|general[1].gpll~PLL_OUTPUT_COUNTER|divclk}
  
@@ -83,10 +86,22 @@ set_false_path -from {ic|snap_loader|snap_reset}
 #set_false_path -from {ic|kbd|Fn*}
 #set_false_path -from {ic|kbd|mod*}
 set_false_path -from {ic|plus3}
-set_false_path -from {ic|page_reg_plus3*}
-set_false_path -from {ic|page_reg_plus3[*]}
 set_false_path -from {ic|zx48}
 set_false_path -from {ic|p1024}
 set_false_path -from {ic|pf1024}
 #set_false_path -from {ic|hps_io|status[*]}
+
+set_false_path -from {ic|page_reg_plus3*}
+set_false_path -from {ic|page_reg_plus3[*]}
+set_false_path -from {ic|page_reg_plus3*}
+set_false_path -from {core_top:ic|u765:u765|*}
+set_false_path -from {core_top:ic|u765:u765|i_bytes_to_read*}
+set_false_path -from {core_top:ic|u765:u765|i_bytes_to_read[*]}
+set_false_path -to {core_top:ic|u765:u765|next_weak_sector*}
+set_false_path -to {core_top:ic|u765:u765|next_weak_sector[*]}
+set_false_path -to {core_top:ic|u765:u765|next_weak_sector[*][*]}
+#set_false_path -to {core_top:ic|ULA:ULA|INT}
+set_false_path -from {core_top:ic|m128} -to {core_top:ic|ULA:ULA|AttrOut[*]}
+
+
 

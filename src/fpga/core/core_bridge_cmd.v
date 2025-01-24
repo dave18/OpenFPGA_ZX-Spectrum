@@ -79,9 +79,11 @@ input   wire            savestate_load_ok,
 input   wire            savestate_load_err,
 
 input   wire            target_dataslot_read_s,       // rising edge triggered
-input   wire            target_dataslot_write,
-input   wire            target_dataslot_getfile,
-input   wire            target_dataslot_openfile,
+input   wire            target_dataslot_read_48_s,       // rising edge triggered
+input   wire            target_dataslot_write_s,
+input   wire            target_dataslot_write_48_s,
+input   wire            target_dataslot_getfile_s,
+input   wire            target_dataslot_openfile_s,
 
 output  reg             target_dataslot_ack,        // asserted upon command start until completion
 output  reg             target_dataslot_ack_s,        // asserted upon command start until completion
@@ -92,6 +94,7 @@ output  reg     [2:0]   target_dataslot_err_s,        // contains result of comm
 
 input   wire    [15:0]  target_dataslot_id_s,         // parameters for each of the read/reload/write commands
 input   wire    [31:0]  target_dataslot_slotoffset_s,
+input   wire    [15:0]  target_dataslot_slotoffset_48_s,
 input   wire    [31:0]  target_dataslot_bridgeaddr_s,
 input   wire    [31:0]  target_dataslot_length_s,
 
@@ -193,7 +196,9 @@ localparam  [3:0]   TARG_ST_WAITRESULT_DSO  = 'd15;
     
     reg             status_setup_done_1, status_setup_done_queue;
     reg             target_dataslot_read_1, target_dataslot_read_queue;
+	 reg             target_dataslot_read_48_1, target_dataslot_read_48_queue;
     reg             target_dataslot_write_1, target_dataslot_write_queue;
+	 reg             target_dataslot_write_48_1, target_dataslot_write_48_queue;
     reg             target_dataslot_getfile_1, target_dataslot_getfile_queue;
     reg             target_dataslot_openfile_1, target_dataslot_openfile_queue;
     
@@ -220,6 +225,11 @@ initial begin
     target_dataslot_err <= 0;
 	 
 	 target_dataslot_read<=0;
+	 target_dataslot_read_48<=0;
+	 target_dataslot_write<=0;
+	 target_dataslot_write_48<=0;
+	 target_dataslot_getfile<=0;
+	 target_dataslot_openfile<=0;
 end
 
 
@@ -240,10 +250,16 @@ synch_3 s_cpu_req (
   
   
 reg    [15:0]  target_dataslot_id;
+reg    [15:0]  target_dataslot_slotoffset_48;
 reg    [31:0]  target_dataslot_slotoffset;
 reg    [31:0]  target_dataslot_bridgeaddr;
 reg    [31:0]  target_dataslot_length;
 reg				target_dataslot_read;
+reg				target_dataslot_read_48;
+reg				target_dataslot_write;
+reg				target_dataslot_write_48;
+reg				target_dataslot_getfile;
+reg				target_dataslot_openfile;
     
 always @(posedge clk) begin
 
@@ -251,7 +267,9 @@ always @(posedge clk) begin
     // and flag a queue that will be cleared later
     status_setup_done_1 <= status_setup_done;
     target_dataslot_read_1 <= target_dataslot_read;
+	 target_dataslot_read_48_1 <= target_dataslot_read_48;
     target_dataslot_write_1 <= target_dataslot_write;
+	 target_dataslot_write_48_1 <= target_dataslot_write_48;
     target_dataslot_getfile_1 <= target_dataslot_getfile;
     target_dataslot_openfile_1 <= target_dataslot_openfile;
     
@@ -261,8 +279,14 @@ always @(posedge clk) begin
     if(target_dataslot_read & ~target_dataslot_read_1) begin
         target_dataslot_read_queue <= 1;
     end
+	 if(target_dataslot_read_48 & ~target_dataslot_read_48_1) begin
+        target_dataslot_read_48_queue <= 1;
+    end
     if(target_dataslot_write & ~target_dataslot_write_1) begin
         target_dataslot_write_queue <= 1;
+    end
+	 if(target_dataslot_write_48 & ~target_dataslot_write_48_1) begin
+        target_dataslot_write_48_queue <= 1;
     end
     if(target_dataslot_getfile & ~target_dataslot_getfile_1) begin
         target_dataslot_getfile_queue <= 1;
@@ -529,12 +553,34 @@ always @(posedge clk) begin
             target_2C <= target_dataslot_length;
             
             tstate <= TARG_ST_DATASLOTOP;
+				
+			end else if(target_dataslot_read_48_queue) begin
+            target_dataslot_read_48_queue <= 0;
+            target_0[15:0] <= 16'h0181;
+            
+            target_20 <= {target_dataslot_slotoffset_48,target_dataslot_id};
+            target_24 <= target_dataslot_slotoffset;
+            target_28 <= target_dataslot_bridgeaddr;
+            target_2C <= target_dataslot_length;
+            
+            tstate <= TARG_ST_DATASLOTOP;
             
         end else if(target_dataslot_write_queue) begin
             target_dataslot_write_queue <= 0;
             target_0[15:0] <= 16'h0184;
             
             target_20 <= target_dataslot_id;
+            target_24 <= target_dataslot_slotoffset;
+            target_28 <= target_dataslot_bridgeaddr;
+            target_2C <= target_dataslot_length;
+            
+            tstate <= TARG_ST_DATASLOTOP;
+				
+			end else if(target_dataslot_write_48_queue) begin
+            target_dataslot_write_48_queue <= 0;
+            target_0[15:0] <= 16'h0185;
+            
+            target_20 <= {target_dataslot_slotoffset_48,target_dataslot_id};
             target_24 <= target_dataslot_slotoffset;
             target_28 <= target_dataslot_bridgeaddr;
             target_2C <= target_dataslot_length;
@@ -596,11 +642,24 @@ always @(posedge clk) begin
 	 if (i_request_pulse && i_write_strobe) begin
 		target_dataslot_id<=target_dataslot_id_s;
 		target_dataslot_slotoffset<=target_dataslot_slotoffset_s;
+		target_dataslot_slotoffset_48<=target_dataslot_slotoffset_48_s;
 		target_dataslot_bridgeaddr<=target_dataslot_bridgeaddr_s;
 		target_dataslot_length<=target_dataslot_length_s;
 		target_dataslot_read<=target_dataslot_read_s;
+		target_dataslot_read_48<=target_dataslot_read_48_s;
+		target_dataslot_write<=target_dataslot_write_s;
+		target_dataslot_write_48<=target_dataslot_write_48_s;
+		target_dataslot_getfile<=target_dataslot_getfile_s;
+		target_dataslot_openfile<=target_dataslot_openfile_s;
 	 end
-	 else target_dataslot_read<=0;
+	 else begin
+		target_dataslot_read<=0;
+		target_dataslot_read_48<=0;
+		target_dataslot_write<=0;
+		target_dataslot_write_48<=0;
+		target_dataslot_getfile<=0;
+		target_dataslot_openfile<=0;
+	end
 	 
 	 if (i_request_pulse) begin
 		dataslot_update_s<=dataslot_update;

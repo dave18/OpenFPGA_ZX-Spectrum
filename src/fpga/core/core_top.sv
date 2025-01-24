@@ -461,11 +461,11 @@ wire        nRFSH;
 wire        nBUSACK;
 wire        nINT;
 wire        nBUSRQ = ~ioctl_download;
-//wire        reset  = buttons[1] | status[0] | cold_reset | warm_reset | shdw_reset | Fn[10] | mmc_reset;
-wire        reset  = status[0] | cold_reset | warm_reset | shdw_reset | Fn[10] | ~rom_loaded;
+wire        reset  = status[0] | cold_reset | warm_reset | shdw_reset | Fn[10] | mmc_reset;
+//wire        reset  = status[0] | cold_reset | warm_reset | shdw_reset | Fn[10];// | ~rom_loaded;
 
-//wire        cold_reset =((mod[2:1] == 1) & Fn[11]) | init_reset | arch_reset | snap_reset | mmc_reset;
-wire        cold_reset =((mod[2:1] == 1) & Fn[11]) | init_reset | arch_reset | snap_reset ;// | ~rom_loaded;
+wire        cold_reset =((mod[2:1] == 1) & Fn[11]) | init_reset | arch_reset | snap_reset | mmc_reset;
+//wire        cold_reset =((mod[2:1] == 1) & Fn[11]) | init_reset | arch_reset | snap_reset ;// | ~rom_loaded;
 wire        warm_reset = (mod[2:1] == 2) & Fn[11];
 wire        shdw_reset = (mod[2:1] == 3) & Fn[11] & ~plus3;
 
@@ -493,8 +493,8 @@ T80pa cpu
 	.CLK(clk_sys),
 	.CEN_p(ce_cpu_p | pause_z80),
 	.CEN_n(ce_cpu_n & ~pause_z80),
-	//.WAIT_n(mmc_ready),
-	.WAIT_n(1'b1),
+	.WAIT_n(mmc_ready),
+	//.WAIT_n(1'b1),
 	.INT_n(nINT),
 	.NMI_n(~NMI),
 	.BUSRQ_n(nBUSRQ),
@@ -519,7 +519,7 @@ wire [7:0] cpu_din =
 		~io_rd   ? port_ff                                    :
 		fdc_sel  ? fdc_dout                                   :
 		mf3_port ? (&addr[14:13] ? page_reg : page_reg_plus3) :
-	//	mmc_sel  ? mmc_dout                                   :
+		mmc_sel  ? mmc_dout                                   :
 		kemp_sel ? kemp_dout                                  :
 		portBF   ? {page_scr_copy, 7'b1111111}                :
 		gs_sel   ? gs_dout                                    :
@@ -568,10 +568,10 @@ always @(posedge clk_sys) load_addr <= ioctl_addr + 25'h400000;
 reg load;
 always @(posedge clk_sys) load <= (reset | ~nBUSACK) & ~nBUSRQ;
 
-wire mmc_ram_en;
 //wire rom_load=(bridge_wr && bridge_addr[20:16] == 5'h15);
 //wire rom_load=(bridge_addr[24:21]==0) & bridge_addr[20] & ~bridge_addr[19];
-wire rom_load=(ioctl_id==16'h200) & ~rom_loaded;
+//wire rom_load=(ioctl_id==16'h200) & ~rom_loaded;
+wire rom_load=ioctl_download && ioctl_id == 16'h200;
 
 //reg [7:0] bridge_byte_in;
 
@@ -594,12 +594,12 @@ always_comb begin
 	endcase*/
 
 	casex({rom_load,snap_reset, load, tape_req, mmc_ram_en, page_special, addr[15:14]})			
-		'b1_XXXX_X_XX: ram_addr = 25'h150000+ioctl_addr[24:0];//bridge_addr[24:0];
+		//'b1_XXXX_X_XX: ram_addr = (ioctl_size_req=='h34000)?25'h14C000+ioctl_addr[24:0]:25'h150000+ioctl_addr[24:0];
+		'b1_XXXX_X_XX: ram_addr = 25'h14C000+ioctl_addr[24:0];
 		'b0_1XXX_X_XX: ram_addr = snap_addr;
 		'b0_01XX_X_XX: ram_addr = load_addr;
 		'b0_001X_X_XX: ram_addr = tape_addr;
-		//'b0001_X_XX: ram_addr = { 4'b1000, mmc_ram_bank,                                     addr[12:0]};
-		'b0_0001_X_XX: ram_addr = { 4'b1000, 4'b0000,                                     addr[12:0]};
+		'b0_0001_X_XX: ram_addr = { 4'b1000, mmc_ram_bank,                                     addr[12:0]};		
 		'b0_0000_0_00: ram_addr = { 3'b101,  page_rom,                                         addr[13:0]}; //ROM
 		'b0_0000_0_01: ram_addr = { 4'b0000, 3'd5,                                             addr[13:0]}; //Non-special page modes
 		'b0_0000_0_10: ram_addr = { 4'b0000, 3'd2,                                             addr[13:0]};
@@ -699,8 +699,7 @@ reg  [3:0] page_rom;
 wire       active_48_rom = zx48 | (page_reg[4] & ~plus3) | (plus3 & page_reg[4] & page_reg_plus3[2] & ~page_special);
 
 always_comb begin
-	//casex({mmc_rom_en, shadow_rom, trdos_en, plusd_mem, mf128_mem, plus3})
-	casex({1'b0, shadow_rom, trdos_en, plusd_mem, mf128_mem, plus3})
+	casex({mmc_rom_en, shadow_rom, trdos_en, plusd_mem, mf128_mem, plus3})	
 		'b1XXXXX: page_rom <=   4'b0011; //esxdos
 		'b01XXXX: page_rom <=   4'b0100; //shadow
 		'b001XXX: page_rom <=   4'b0101; //trdos
@@ -729,7 +728,7 @@ always @(posedge clk_sys) begin
 		page_128k   <= 0;
 		page_reg[4] <= Fn[10];
 		page_reg_plus3[2] <= Fn[10];
-		shadow_rom <= shdw_reset & ~plusd_en;
+		shadow_rom <= shdw_reset & ~plusd_en;		
 		if(Fn[10] && (rmod == 1)) begin
 			p1024  <= 0;
 			pf1024 <= 0;
@@ -747,7 +746,8 @@ always @(posedge clk_sys) begin
 		end
 		else begin
 			if(m1 && ~old_m1 && addr[15:14]) shadow_rom <= 0;
-			if(m1 && ~old_m1 && ~plusd_en && ~mod[0] && (addr == 'h66) && ~plus3) shadow_rom <= 1; 
+			if(m1 && ~old_m1 && ~plusd_en && ~mod[0] && (addr == 'h66) && ~plus3) shadow_rom <= 1; 			
+			
 
 			if(io_wr & ~old_wr) begin
 				if(page_write) begin
@@ -1129,8 +1129,9 @@ assign video_hs=video_hs_reg;
 assign video_de=video_de_reg;
 
 reg menu_state;
-reg vkb_state;
-wire osd_active=vkb_state | menu_state;
+reg [1:0] vkb_state;
+reg debug_state;
+wire osd_active=vkb_state[0] | menu_state | debug_state;
 
 //On Screen Display paramters
 wire [8:0]OSDX=9'd13;
@@ -1209,6 +1210,12 @@ end*/
 //  SOFT CPU FOR PROCESSING FILES/OSD ETC               //
 //////////////////////////////////////////////////////////
 
+reg [63:0] status;
+reg  status_set;
+reg  status_ack;
+wire [11:1] Fn;
+wire  [2:0] mod;
+
 
 reg [31:0] pico_mem_rd;
 wire [31:0] pico_mem_wr;
@@ -1232,6 +1239,7 @@ wire clk_pico=ce_7mp;
         32'h1xxx_xxxx: pico_mem_ready <= ~pico_mem_ready & pico_mem_valid;
         32'h2xxx_xxxx: pico_mem_ready <= ~pico_mem_ready & pico_mem_valid;
 		  32'h3xxx_xxxx: pico_mem_ready <= ~pico_mem_ready & pico_mem_valid;
+		  32'h4xxx_xxxx: pico_mem_ready <= ~pico_mem_ready & pico_mem_valid;
         default: pico_mem_ready <= 0;
       endcase
     end
@@ -1372,11 +1380,36 @@ begin
 		32'h3000_080c:	pico_mem_rd<={24'h0,ram_dout};
 		32'h3000_0810:	pico_mem_rd<=ioctl_addr;*/
 		
-		32'h3000_0800:	pico_mem_rd<={28'h0,ioctl_state};	//debug ioctl_state
-		32'h3000_0804:	pico_mem_rd<=ioctl_addr;	//debug ioctl_addr
+		//32'h3000_0800:	pico_mem_rd<={8'b10000000,8'h0,6'h0,debug_image_scan_state,debug_buff[0]};	//debug ioctl_state
+		//32'h3000_0800:	pico_mem_rd<={ioctl_id,4'b0000,ioctl_state,7'b0000000,vhd_en};
+		
+		//32'h3000_0804:	pico_mem_rd<={ioctl_id,8'h0,7'b0000000,fdd_ready};//sd_ack_addr;//ioctl_addr;	//debug ioctl_addr
 		//32'h3000_0808:	pico_mem_rd<={31'h0,target_dataslot_ack_s};
-		32'h3000_080c:	pico_mem_rd<={24'h0,ioctl_dout};
-		32'h3000_0810:	pico_mem_rd<={7'h0,snap_addr};
+		//32'h3000_080c:	pico_mem_rd<=ioctl_addr;//{24'h0,ioctl_dout};
+		//32'h3000_0810:	pico_mem_rd<=ioctl_size;
+				
+		32'h4000_00_04: pico_mem_rd<={16'h0,pico_dataslot_size_u};
+		32'h4000_00_08: pico_mem_rd<=pico_dataslot_size_l;
+		32'h4000_00_0c: pico_mem_rd<={16'h0,pico_dataslot_id};
+		32'h4000_00_10: pico_mem_rd<={31'h0,ioctl_download};
+		32'h4000_00_1c: pico_mem_rd<={31'h0,pico_dataslot_update};
+		32'h4000_00_20: pico_mem_rd<={31'h0,ioctl_complete};
+		//32'h4000_00_24: pico_mem_rd<={16'h0,debug_image_track_offsets_in};
+		
+		//32'h4000_01_00: pico_mem_rd<={sd_lba_plus3[23:0],8'h0};
+		32'h4000_01_00: pico_mem_rd<=sd_lba[0];//sd_lba_plus3;
+		32'h4000_01_04: pico_mem_rd<={16'h0,8'h0,6'h0,sd_sector_request};
+		
+		32'h4000_01_10: pico_mem_rd<='h200;
+		32'h4000_01_1c: pico_mem_rd<=sd_lba[1];
+		//32'h4000_02_xx: pico_mem_rd<={24'h0,debug_buff[pico_address[4:2]]};
+		
+		
+		32'h4000_02_04: pico_mem_rd<=filename_dout;
+		
+		32'h4000_04_00: pico_mem_rd<={24'h0,sd_buff_din_plus3};
+		32'h4000_04_04: pico_mem_rd<={24'h0,sd_buff_din_wd};
+		
 
 		default: pico_mem_rd<=32'h0;
 				
@@ -1404,17 +1437,60 @@ begin
 end
 */
 
-always @* //_comb
+reg old_dataslot_update;
+reg pico_dataslot_update;
+reg [15:0] pico_dataslot_id;
+reg [31:0] pico_dataslot_size_l;
+reg [15:0] pico_dataslot_size_u;
+reg dataslot_ack;
+reg pico_ioctl_complete_ack;
+
+
+
+always @(posedge clk_74a or negedge reset_n) begin
+	if (!reset_n) begin
+		pico_dataslot_update<=0;
+		old_dataslot_update<=0;
+	end
+	else
+	begin
+		if (dataslot_update & ~old_dataslot_update) begin
+			pico_dataslot_update<=dataslot_update;
+			pico_dataslot_size_l<=dataslot_update_size;
+			pico_dataslot_size_u<=dataslot_update_size_u;
+			pico_dataslot_id<=dataslot_update_id;
+		end else if (dataslot_ack) begin
+			pico_dataslot_update<=0;
+		end
+		old_dataslot_update<=dataslot_update;
+	end
+end
+
+initial begin
+	ioctl_download_req<=0;
+	ioctl_upload_req<=0;
+end
+
+always @(posedge clk_pico or negedge reset_n) //_comb
 begin	
-	if (pico_mem_wstrb != 0 && pico_mem_valid) begin
+	if (!reset_n) begin
+		ioctl_download_req<=0;
+		ioctl_upload_req<=0;
+		rom_loaded<=0;
+		dataslot_ack<=0;
+		status_ack<=0;
+		pico_ioctl_complete_ack<=0;
+//		u765_debug_assert<=0;
+	end else if (pico_mem_wstrb != 0 && pico_mem_valid) begin
 		case (pico_address)
 		
 //			32'h3000_03_00: requested_addr<=pico_mem_wr[24:0];
 
 			//OSD control
-			32'h3000_00_E0: vkb_state<=pico_mem_wr[0];
+			32'h3000_00_E0: vkb_state<=pico_mem_wr[1:0];
 			32'h3000_00_E4: menu_state<=pico_mem_wr[0];
 			32'h3000_00_E8: pause_z80_req<=pico_mem_wr[0];
+			32'h3000_00_EC: debug_state<=pico_mem_wr[0];
 		
 			//Virtual keyboard reads
 			32'h3000_01_00: vkb_keyrowFE<=pico_mem_wr[4:0];
@@ -1520,11 +1596,47 @@ begin
 			32'h3000_05_34: joykb_keyrowDF[9]<=pico_mem_wr[4:0];
 			32'h3000_05_38: joykb_keyrowBF[9]<=pico_mem_wr[4:0];
 			32'h3000_05_3c: joykb_keyrow7F[9]<=pico_mem_wr[4:0];
+			
+			32'h3000_06_00: begin
+				Fn<=pico_mem_wr[10:0];
+				mod<=pico_mem_wr[18:16];
+			end
+			
+			32'h4000_00_00: ioctl_size_req<=pico_mem_wr;
+			32'h4000_00_04: ioctl_addr_h_req<=pico_mem_wr[15:0];
+			32'h4000_00_08: ioctl_addr_l_req<=pico_mem_wr;
+			32'h4000_00_0c: ioctl_id_req<=pico_mem_wr[15:0];
+			32'h4000_00_10: ioctl_download_req<=pico_mem_wr[0];
+			32'h4000_00_14: ioctl_upload_req<=pico_mem_wr[0];
+			32'h4000_00_18: rom_loaded<=pico_mem_wr[0];
+			32'h4000_00_1c: dataslot_ack<=pico_mem_wr[0];
+			32'h4000_00_20: pico_ioctl_complete_ack<=pico_mem_wr[0];
+			32'h4000_00_24: ioctl_index<=pico_mem_wr[7:0];
+			
+			//32'h4000_01_00: sd_buff_addr<=pico_mem_wr[8:0];
+			32'h4000_01_0c: {img_readonly,img_mounted[0]}<=pico_mem_wr[1:0];
+			32'h4000_01_10: img_size[31:0]<=pico_mem_wr;
+			32'h4000_01_14: img_size[63:32]<=pico_mem_wr;
+			32'h4000_01_18: img_mounted[1]<=pico_mem_wr[0];
+			
+			
+			32'h4000_02_00: filename_addr<=pico_mem_wr;
+			32'h4000_02_04: filename_din<=pico_mem_wr;
+			32'h4000_02_08: filename_wr<=pico_mem_wr[0];
+			
+//			32'h4000_04_00: u765_debug_addr<=pico_mem_wr[8:0];
+//			32'h4000_04_04: u765_debug_assert<=pico_mem_wr[0];
+				
+			
+			
 
 				
 		endcase
 	end
-	else status_ack<=0;
+	else begin
+		status_ack<=0;
+		dataslot_ack<=0;
+	end
 end
 
 
@@ -1577,7 +1689,7 @@ reg  [4:0] vkb_keyrow7F;
   
 always @* begin
 
-	if (vkb_state) begin
+	if (vkb_state>0) begin
 		key_data[4] = ~((~vkb_keyrowFE[4] & ~addr[8]) | (~vkb_keyrowFD[4] & ~addr[9]) | (~vkb_keyrowFB[4] & ~addr[10]) | (~vkb_keyrowF7[4] & ~addr[11]) | (~vkb_keyrowEF[4] & ~addr[12]) | (~vkb_keyrowDF[4] & ~addr[13]) | (~vkb_keyrowBF[4] & ~addr[14]) | (~vkb_keyrow7F[4] & ~addr[15]));
 		key_data[3] = ~((~vkb_keyrowFE[3] & ~addr[8]) | (~vkb_keyrowFD[3] & ~addr[9]) | (~vkb_keyrowFB[3] & ~addr[10]) | (~vkb_keyrowF7[3] & ~addr[11]) | (~vkb_keyrowEF[3] & ~addr[12]) | (~vkb_keyrowDF[3] & ~addr[13]) | (~vkb_keyrowBF[3] & ~addr[14]) | (~vkb_keyrow7F[3] & ~addr[15]));
 		key_data[2] = ~((~vkb_keyrowFE[2] & ~addr[8]) | (~vkb_keyrowFD[2] & ~addr[9]) | (~vkb_keyrowFB[2] & ~addr[10]) | (~vkb_keyrowF7[2] & ~addr[11]) | (~vkb_keyrowEF[2] & ~addr[12]) | (~vkb_keyrowDF[2] & ~addr[13]) | (~vkb_keyrowBF[2] & ~addr[14]) | (~vkb_keyrow7F[2] & ~addr[15]));
@@ -1818,15 +1930,117 @@ always @(posedge clk_sys) begin
 	end
 
 	old_m1 <= m1;
-	//if(~old_m1 & m1 & mod[0] & (addr == 'h66) & ~&mmc_mode) {mf128_mem, mf128_en} <= 2'b11;
-	if(~old_m1 & m1 & mod[0] & (addr == 'h66)) {mf128_mem, mf128_en} <= 2'b11;
+	if(~old_m1 & m1 & mod[0] & (addr == 'h66) & ~&mmc_mode) {mf128_mem, mf128_en} <= 2'b11;
+	//if(~old_m1 & m1 & mod[0] & (addr == 'h66)) {mf128_mem, mf128_en} <= 2'b11;
 end
 
 
 //////////////////   MMC   //////////////////
-
 reg [1:0] mmc_mode;
-//TODO - inplement reset of this
+reg       vsd_sel = 1;
+reg vhd_en = 0;
+always @(posedge clk_sys) begin
+	//reg vhd_en = 0;
+
+	if(img_mounted[1]) vhd_en <= |img_size;
+	if(!reset_n) vhd_en <= 0;
+	
+	if(reset) begin
+		vsd_sel  <= vhd_en;// && !status[33:32]);
+		//mmc_mode <= (vhd_en || status[33:32]) ? (status[31:30] ? status[31:30] : 2'b11) : 2'b00;
+		mmc_mode <= vhd_en ? (status[31:30] ? status[31:30] : 2'b11) : 2'b00;
+	end
+end
+
+//wire       mmc_reset = (img_mounted[1] & !status[33:32]);
+wire       mmc_reset = img_mounted[1];
+
+wire       mmc_sel;
+wire [7:0] mmc_dout;
+wire       mmc_mem_en;
+wire       mmc_rom_en;
+wire       mmc_ram_en;
+wire [3:0] mmc_ram_bank;
+wire       mmc_ready;
+
+divmmc divmmc
+(
+	.*,
+	.disable_pagein(tape_loaded),
+	.mode(mmc_mode), //00-off, 01-divmmc, 10-zxmmc, 11-divmmc+esxdos
+	.din(cpu_dout),
+	.dout(mmc_dout),
+	.active_io(mmc_sel),
+	.ready(mmc_ready),
+
+	.rom_active(mmc_rom_en),
+	.ram_active(mmc_ram_en),
+	.ram_bank(mmc_ram_bank),
+	
+	.spi_ce(ce_spi),
+	.spi_ss(sdss),
+	.spi_clk(sdclk),
+	.spi_di(sdmiso),
+	.spi_do(sdmosi)
+);
+
+wire sdss;
+wire sdclk;
+wire vsdmiso;
+wire sdmosi;
+//wire sdmiso = vsd_sel ? vsdmiso : SD_MISO; 
+wire sdmiso = vsdmiso; 
+
+sd_card sd_card
+(
+		
+	.clk_sys(clk_sys),
+	.reset(reset),	
+	
+	.img_size(img_size),
+	.sdhc(1),
+	.img_mounted(img_mounted[1]),
+	
+	.sd_rd(sd_rd_mmc),
+	.sd_wr(sd_wr_mmc),
+	.sd_ack(sd_ack[1]),
+	.sd_lba(sd_lba_mmc),
+	
+	
+	.sd_buff_addr(ioctl_addr[8:0]),
+	//.sd_buff_addr(u765_addr),
+	.sd_buff_dout(ioctl_dout),
+	.sd_buff_din(sd_buff_din_mmc),	
+	.sd_buff_wr((ioctl_wr) && (ioctl_index[4:0]==3)),
+
+	.clk_spi(clk_sys),
+	.ss(sdss | ~vsd_sel),
+	.sck(sdclk),
+	.mosi(sdmosi),
+	.miso(vsdmiso)
+);
+
+//assign SD_CS   = sdss   |  vsd_sel;
+//assign SD_SCK  = sdclk  & ~vsd_sel;
+//assign SD_MOSI = sdmosi & ~vsd_sel;
+
+reg sd_act;
+always @(posedge clk_sys) begin
+	reg old_mosi, old_miso;
+	integer timeout = 0;
+
+	old_mosi <= sdmosi;
+	old_miso <= sdmiso;
+
+	sd_act <= 0;
+	if(timeout < 1000000) begin
+		timeout <= timeout + 1;
+		sd_act <= 1;
+	end
+
+	if((old_mosi ^ sdmosi) || (old_miso ^ sdmiso)) timeout <= 0;
+end
+
 
 ///////////////////   FDC   ///////////////////
 reg         plusd_en;
@@ -1877,15 +2091,18 @@ always @(posedge clk_sys) begin
 	if(cold_reset) {plus3_fdd_ready, fdd_ready, plusd_en} <= 0;
 	if(reset)      {plusd_mem, trdos_en} <= 0;
 
-	old_mounted <= 1'b0;//img_mounted[0];
+	old_mounted <= img_mounted[0];
 	if(~old_mounted & img_mounted[0]) begin
-		fdd_ro    <= 1'b0;//img_readonly;
+		fdd_ro    <= img_readonly;
 
 	   //Only TRDs on +3
-//		fdd_ready <= ((!ioctl_index[7:6] & plus3) | ~plus3) && (img_size != 0);
-//		plusd_en  <= (|ioctl_index[7:6] & ~plus3) && (img_size != 0);
+		//fdd_ready <= (((ioctl_id == 'h101) & plus3) | ~plus3) && (img_size != 0);
+		//plusd_en  <= ((ioctl_id != 'h101) & ~plus3) && (img_size != 0);
+		fdd_ready <= ((!ioctl_index[7:6] & plus3) | ~plus3) && (img_size != 0);
+		plusd_en  <= (|ioctl_index[7:6] & ~plus3) && (img_size != 0);
 		//DSK only for +3
-//		plus3_fdd_ready <= (plus3 & (ioctl_index[7:6] == 2)) && (img_size != 0);
+		plus3_fdd_ready <= (plus3 & (ioctl_index[7:6] == 2)) && (img_size != 0);
+		//plus3_fdd_ready <= (plus3 & (ioctl_id == 'h100)) && (img_size != 0);
 	end
 
 	old_rd <= io_rd;
@@ -1905,24 +2122,18 @@ always @(posedge clk_sys) begin
 		if(~old_wr & io_wr & fdd_sel & addr[7]) {fdd_side, fdd_reset, fdd_drive1} <= {~cpu_dout[4], ~cpu_dout[2], !cpu_dout[1:0]};
 		if(m1 && ~old_m1) begin
 			if(addr[15:14]) trdos_en <= 0;
-				else if((addr[13:8] == 'h3D) & active_48_rom & ~&mmc_mode) trdos_en <= 1;
+				else if((addr[13:8] == 'h3D) & active_48_rom & ~&mmc_mode) trdos_en <= 1;				
 				//else if(~mod[0] & (addr == 'h66)) trdos_en <= 1;
 		end
 	end
 end
 
-/*
-tput[31:0] sd_lba,
-	output reg   sd_rd,
-	output reg   sd_wr,
-	input        sd_ack,
-	input  [8:0] sd_buff_addr,
-	input  [7:0] sd_buff_dout,
-	output [7:0] sd_buff_din,
-	input        sd_buff_wr,
-	*/
 
-//TODO - implement SD Card emulation	
+wire        sd_rd_mmc;
+wire        sd_wr_mmc;
+wire [31:0] sd_lba_mmc;
+wire [7:0]  sd_buff_din_mmc;
+
 wire 			sd_rd_plus3;
 wire 			sd_wr_plus3;
 wire [31:0] sd_lba_plus3;
@@ -1933,17 +2144,17 @@ wire 			sd_wr_wd;
 wire [31:0] sd_lba_wd;
 wire [7:0]  sd_buff_din_wd;
 
-wire [31:0] sd_lba;//[2];// = '{plus3_fdd_ready ? sd_lba_plus3 : sd_lba_wd, sd_lba_mmc};
-wire  [1:0] sd_rd;// = {sd_rd_mmc, plus3_fdd_ready ? sd_rd_plus3 : sd_rd_wd};
-wire  [1:0] sd_wr;// = {sd_wr_mmc, plus3_fdd_ready ? sd_wr_plus3 : sd_wr_wd};
+wire [31:0] sd_lba[2] = '{plus3_fdd_ready ? sd_lba_plus3 : sd_lba_wd, sd_lba_mmc};
+wire  [1:0] sd_rd = {sd_rd_mmc, plus3_fdd_ready ? sd_rd_plus3 : sd_rd_wd};
+wire  [1:0] sd_wr = {sd_wr_mmc, plus3_fdd_ready ? sd_wr_plus3 : sd_wr_wd};
 wire  [1:0] sd_ack;
-wire  [8:0] sd_buff_addr;
+reg  [8:0] sd_buff_addr;
 wire  [7:0] sd_buff_dout;
-wire  [7:0] sd_buff_din;//[2] = '{plus3_fdd_ready ? sd_buff_din_plus3 : sd_buff_din_wd, sd_buff_din_mmc};
+wire  [7:0] sd_buff_din[2] = '{plus3_fdd_ready ? sd_buff_din_plus3 : sd_buff_din_wd, sd_buff_din_mmc};
 wire        sd_buff_wr;
-wire  [1:0] img_mounted;
-wire [63:0] img_size;
-wire        img_readonly;
+reg  [1:0] img_mounted;
+reg [63:0] img_size;
+reg        img_readonly;
 
 wd1793 #(1) wd1793
 (
@@ -1965,15 +2176,17 @@ wd1793 #(1) wd1793
 	.sd_rd(sd_rd_wd),
 	.sd_wr(sd_wr_wd), 
 	.sd_ack(sd_ack[0]),
-	.sd_buff_addr(sd_buff_addr),
-	.sd_buff_dout(sd_buff_dout),
+	.sd_buff_addr(ioctl_addr[8:0]),
+	//.sd_buff_addr(u765_addr),
+	.sd_buff_dout(ioctl_dout),
 	.sd_buff_din(sd_buff_din_wd), 
-	.sd_buff_wr(sd_buff_wr),
+	.sd_buff_wr((ioctl_wr) && (ioctl_index[4:0]==1) && (ioctl_index[7:6]!=2)),
 
 	.wp(fdd_ro),
 
 	.size_code(plusd_en ? 3'd4 : 3'd1),
-	.layout(ioctl_index[7:6] == 1),   // 0 = Track-Side-Sector, 1 - Side-Track-Sector
+	//.layout(ioctl_id == 'h103),   // 0 = Track-Side-Sector, 1 - Side-Track-Sector
+	.layout(ioctl_index[7:6] == 1),
 	.side(fdd_side),
 	.ready(fdd_drive1 & fdd_ready),
 
@@ -1985,6 +2198,22 @@ wd1793 #(1) wd1793
 );
 
 
+/*wire [1:0] debug_image_scan_state;
+wire debug_buff_wait;
+wire debug_sd_busy;
+wire debug_image_edsk;
+wire [7:0] debug_buff[8];
+wire [11:0] debug_buff_addr;
+wire [31:0] debug_i_seek_pos;
+wire [15:0] debug_image_track_offsets_in;
+wire [15:0] debug_i_sector_size;
+*/
+
+//reg u765_debug_assert;
+//reg [8:0] u765_debug_addr;
+//wire [8:0]u765_addr=u765_debug_assert?u765_debug_addr:ioctl_addr[8:0];
+
+reg [31:0] sd_ack_addr;
 
 u765 #(20'd1800,1) u765
 (
@@ -2007,12 +2236,91 @@ u765 #(20'd1800,1) u765
 	.sd_lba(sd_lba_plus3),
 	.sd_rd(sd_rd_plus3),
 	.sd_wr(sd_wr_plus3),
-	.sd_ack(sd_ack[0]),
-	.sd_buff_addr(sd_buff_addr),
-	.sd_buff_dout(sd_buff_dout),
+	.sd_ack(sd_ack[0]),	
+	.sd_buff_addr(ioctl_addr[8:0]),
+	//.sd_buff_addr(u765_addr),
+	.sd_buff_dout(ioctl_dout),
 	.sd_buff_din(sd_buff_din_plus3),
-	.sd_buff_wr(sd_buff_wr)
+	//.sd_buff_wr(sd_buff_wr)
+	.sd_buff_wr((ioctl_wr) && (ioctl_index==8'h81))
+	/*.debug_image_scan_state(debug_image_scan_state),
+	.debug_buff_wait(debug_buff_wait),
+	.debug_sd_busy(debug_sd_busy),
+	.debug_image_edsk(debug_image_edsk),
+	.debug_buff(debug_buff),
+	.debug_buff_addr(debug_buff_addr),
+	.debug_i_seek_pos(debug_i_seek_pos),
+	.debug_image_track_offsets_in(debug_image_track_offsets_in),
+	.debug_i_sector_size(debug_i_sector_size)*/
 );
+
+reg [1:0] sd_sector_request;
+reg [1:0] old_sd_rd;
+//reg [8:0] sd_plus3_transfer_size;
+reg [1:0] old_pico_ioctl_complete_ack;
+//reg [7:0] debug_data[32];
+always @(posedge clk_sys) begin	
+	if (~old_sd_rd[0] & sd_rd[0]) begin		//rising edge of sd_rd		
+		sd_sector_request[0]<=1;
+	end
+	if (~old_sd_rd[1] & sd_rd[1]) begin		//rising edge of sd_rd		
+		sd_sector_request[1]<=1;
+	end
+	if (sd_sector_request[0] & ioctl_download_req) begin
+		sd_sector_request[0]<=0;	//turn off request once download starts
+		sd_ack[0]<=1;
+	end
+	if (sd_sector_request[1] & ioctl_download_req) begin
+		sd_sector_request[1]<=0;	//turn off request once download starts
+		sd_ack[1]<=1;
+	end
+	if ((~old_pico_ioctl_complete_ack[0] & pico_ioctl_complete_ack) && (ioctl_index[1:0]==1)) begin	
+		sd_ack[0]<=0;
+		//sd_ack_addr<=ioctl_addr;
+	end
+	if ((~old_pico_ioctl_complete_ack[1] & pico_ioctl_complete_ack) && (ioctl_index[1:0]==3)) begin	
+		sd_ack[1]<=0;
+		//sd_ack_addr<=ioctl_addr;
+	end
+	
+	old_sd_rd<=sd_rd;
+	//if ((ioctl_index[1:0]==1)) old_pico_ioctl_complete_ack[0]<=pico_ioctl_complete_ack;
+	//if ((ioctl_index[1:0]==3)) old_pico_ioctl_complete_ack[1]<=pico_ioctl_complete_ack;
+	old_pico_ioctl_complete_ack<={pico_ioctl_complete_ack,pico_ioctl_complete_ack};
+	//if (bridge_addr<'d32) debug_data[bridge_addr[4:0]]<=sd_buff_dout;
+end
+
+/*always_comb begin
+	case (bridge_addr[1:0])
+	'b00:	sd_buff_dout=bridge_wr_data[7:0];
+	'b01:	sd_buff_dout=bridge_wr_data[15:8];
+	'b10:	sd_buff_dout=bridge_wr_data[23:16];
+	'b11:	sd_buff_dout=bridge_wr_data[31:24];		
+	endcase
+end
+
+wire [7:0] diskram_dout_to_u765;
+wire [7:0] diskram_din_from_u765;
+wire [31:0] diskram_dout_to_bridge;
+wire diskram_cpu_write=1'b0;
+//wire [8:0] disk_addr=sd_buff_addr;
+*/
+
+/*diskram diskram (
+	.clock_a(clk_74a),
+	.wren_a(bridge_wr && bridge_addr[31:28] == 4'h7),
+	.address_a(bridge_addr[31:2]),
+	.data_a({bridge_wr_data[7:0], bridge_wr_data[15:8], bridge_wr_data[23:16], bridge_wr_data[31:24]}),
+	.q_a(diskram_dout_to_bridge),
+	
+	.clock_b(clk_sys),
+	.wren_b(diskram_cpu_write),
+	//.address_b(disk_addr),
+	.address_b(sd_buff_addr),
+	.data_b(diskram_din_from_765),
+	.q_b(diskram_dout_to_765)
+);
+*/
 
 ///////////////////   TAPE   ///////////////////
 wire [24:0] tape_addr = 25'h400000 + tape_addr_raw;
@@ -2049,9 +2357,9 @@ smart_tape tape
 	.buff_addr(tape_addr_raw),
 	.buff_din(ram_dout),
 
-	.ioctl_download(ioctl_download && (ioctl_id == 0 || ioctl_id == 1 || ioctl_id == 2)),
+	.ioctl_download(ioctl_download && (ioctl_index[4:0] == 2)),
 	.tape_size(ioctl_addr),
-	.tape_mode(ioctl_id[1:0]),
+	.tape_mode(ioctl_index[7:6]),
 
 	.m1(~nM1 & ~nMREQ),
 	.rom_en(active_48_rom),
@@ -2096,6 +2404,7 @@ initial begin
 	status<=64'h1;	//start off with init_reset held
 	status_set<=0;
 	status_ack<=0;
+	arch_set <= 0;
 end
 
 always @(posedge clk_sys) begin
@@ -2103,7 +2412,7 @@ always @(posedge clk_sys) begin
 	reg [6:1] old_Fn;
 	reg       setwait = 0;
 
-	arch_set <= 0;
+	//arch_set <= 0;
 	old_Fn <= Fn[6:1];
 	if(mod == 2 && (old_Fn != Fn[6:1])) begin
 		if(~old_Fn[1] & Fn[1]) {setwait,arch_set,arch} <= {2'b11,ARCH_ZX48 }; // Alt+F1 - ZX 48
@@ -2121,6 +2430,7 @@ always @(posedge clk_sys) begin
 		timeout <= '1;
 		arch_reset <= 1;
 		setwait <= 0;
+		arch_set <= 0;
 	end
 end
 
@@ -2144,12 +2454,12 @@ snap_loader #(ARCH_ZX48, ARCH_ZX128, ARCH_ZX3, ARCH_P128) snap_loader
 (
 	.clk_sys(clk_sys),
 
-	.ioctl_download(ioctl_download && (ioctl_id == 3 || ioctl_id == 4)),
+	.ioctl_download(ioctl_download && ioctl_index[4:0] == 4),
 	.ioctl_addr(ioctl_addr),
 	.ioctl_data(ioctl_dout),
 	.ioctl_wr(ioctl_wr2),
 	.ioctl_wait(sna_wait),
-	.snap_sna(ioctl_id==3),
+	.snap_sna(ioctl_index[7:6]),
 
 	.ram_ready(ram_ready),
 
@@ -2217,6 +2527,7 @@ end
     wire            dataslot_update;
     wire    [15:0]  dataslot_update_id;
     wire    [31:0]  dataslot_update_size;
+	 wire    [15:0]  dataslot_update_size_u;
 	 
 	 wire            dataslot_update_s;
     wire    [15:0]  dataslot_update_id_s;
@@ -2253,6 +2564,8 @@ end
 
     reg             target_dataslot_read;       
     reg             target_dataslot_write;
+	 reg             target_dataslot_read_48;       
+    reg             target_dataslot_write_48;
     reg             target_dataslot_getfile;    // require additional param/resp structs to be mapped
     reg             target_dataslot_openfile;   // require additional param/resp structs to be mapped
     
@@ -2266,6 +2579,7 @@ end
 
     reg     [15:0]  target_dataslot_id;
     reg     [31:0]  target_dataslot_slotoffset;
+	 reg     [15:0]  target_dataslot_slotoffset_48;
     reg     [31:0]  target_dataslot_bridgeaddr;
     reg     [31:0]  target_dataslot_length;
     
@@ -2344,9 +2658,11 @@ core_bridge_cmd icb (
     .osnotify_inmenu        ( osnotify_inmenu ),
     
     .target_dataslot_read_s     ( target_dataslot_read ),
-    .target_dataslot_write      ( target_dataslot_write ),
-    .target_dataslot_getfile    ( target_dataslot_getfile ),
-    .target_dataslot_openfile   ( target_dataslot_openfile ),
+    .target_dataslot_write_s      ( target_dataslot_write ),
+	 .target_dataslot_read_48_s     ( target_dataslot_read_48 ),
+    .target_dataslot_write_48_s      ( target_dataslot_write_48 ),
+    .target_dataslot_getfile_s    ( target_dataslot_getfile ),
+    .target_dataslot_openfile_s   ( target_dataslot_openfile ),
     
     .target_dataslot_ack        ( target_dataslot_ack ),
 	 .target_dataslot_ack_s        ( target_dataslot_ack_s ),
@@ -2356,6 +2672,7 @@ core_bridge_cmd icb (
 
     .target_dataslot_id_s         ( target_dataslot_id ),
     .target_dataslot_slotoffset_s ( target_dataslot_slotoffset ),
+	 .target_dataslot_slotoffset_48_s ( target_dataslot_slotoffset_48 ),
     .target_dataslot_bridgeaddr_s ( target_dataslot_bridgeaddr ),
     .target_dataslot_length_s     ( target_dataslot_length ),
 
@@ -2378,12 +2695,6 @@ core_bridge_cmd icb (
 
 
 
-//////////////// SOFT CPU ///////////////////////////////
-reg [63:0] status;
-reg  status_set;
-reg  status_ack;
-wire [11:1] Fn;
-wire  [2:0] mod;
 
 
 
@@ -2485,6 +2796,8 @@ end*/
 
 ////  IOCTL Emulation for MiSTer Compatibility  //////////
 
+
+
 wire [31:0] bridgeram_rd_data_ioctl;
 //1024 bytes
 bram_block_dp #(
@@ -2504,11 +2817,35 @@ bram_block_dp #(
       .b_dout(bridgeram_rd_data_ioctl)
   );
 
+reg [6:0] filename_addr;
+wire [31:0] filename_dout;
+reg [31:0] filename_din;
+reg filename_wr;
+  //256 bytes
+bram_block_dp #(
+      .DATA(32),
+      .ADDR(7)
+  ) filenameram (
+      .a_clk (clk_74a),
+      .a_wr  (bridge_wr && bridge_addr[31:28] == 4'h7),
+      .a_addr(bridge_addr[31:2]),
+      .a_din ({bridge_wr_data[7:0], bridge_wr_data[15:8], bridge_wr_data[23:16], bridge_wr_data[31:24]}),		
+      //.a_dout(),
+
+      .b_clk (clk_sys),
+      .b_wr  (filename_wr),
+      .b_addr(filename_addr),
+      .b_din (filename_din),
+      .b_dout(filename_dout)
+  );
+
  //state machine to implement MiSTer style IOCTL
- reg [3:0]  ioctl_state;
+ reg [4:0]  ioctl_state;
  reg	ioctl_download;
+ //reg	ioctl_upload;
  reg [31:0] ioctl_size;
  reg [15:0] ioctl_id;
+ 
  reg [31:0] ioctl_addr;
  reg ioctl_wr;
  reg ioctl_wr_old;
@@ -2518,6 +2855,17 @@ bram_block_dp #(
  reg [7:0] ioctl_dout;
  reg [9:0] ioctl_bytes_to_send;
  reg [7:0] ioctl_index;
+ 
+reg [31:0] ioctl_size_req;
+reg [15:0] ioctl_addr_h_req;
+reg [31:0] ioctl_addr_l_req;
+reg [47:0] ioctl_addr_offset;
+reg [15:0] ioctl_id_req;
+reg ioctl_download_req;
+reg ioctl_upload_req;
+reg ioctl_old_download_req;
+reg ioctl_old_upload_req;
+reg ioctl_complete;
 
 //reg [31:0] dataslot_update_size_latch;
 //reg [15:0] dataslot_update_id_latch;
@@ -2533,42 +2881,71 @@ initial begin
 	ioctl_id<=16'h0;
 	rom_loaded<=0;
 	ioctl_state<=0;
-	ioctl_wait<=0;
+	ioctl_download_req<=0;
+	ioctl_old_download_req<=0;
+	ioctl_old_upload_req<=0;
+	ioctl_download<=0;
 end
 
 reg rom_loaded;
 reg bridge_req;
 reg bridge_wstrb;
-always @(posedge ce_7mp) begin //clk_sys) begin
-if (!ioctl_wait) begin		//make sure core isn't asserting wait							
+always @(posedge ce_7mp or negedge reset_n) begin //clk_sys) begin
+if (!reset_n) begin
+	ioctl_addr<=32'h0;
+	ioctl_id<=16'h0;
+	ioctl_state<=0;
+	ioctl_old_download_req<=0;
+	ioctl_old_upload_req<=0;
+	ioctl_download<=0;
+	ioctl_complete<=0;
+end else if (!ioctl_wait) begin		//make sure core isn't asserting wait							
 	case (ioctl_state)
-		4'd0:	begin		//IDLE - Listen for a dataslot update
+		'd0:	begin		//Wait for a download instruction
 			bridge_wstrb<=0;
 			bridge_req<=~bridge_req;	//while idle -> toggle request line to check for updates
-			if ((rom_loaded==0) && (status_running==1)) begin//(~rom_loaded & reset_n) begin // & reset_n) begin		//need to load rom in ram
-				bridge_req<=0;
-				ioctl_state<=1;
-				//ioctl_download<=1;						//mark download active
-				ioctl_size<=196608;	//store file size
-				ioctl_id<=16'h200;			//store file ID
-				ioctl_addr<=32'h0;						//set address to start
-				ioctl_wr<=0;								//byte not ready yet				
-			end
 			//else if (dataslot_update_s) begin // & rom_loaded) begin				
-			if (dataslot_update_s & rom_loaded) begin				
+			if (ioctl_download_req & ~ioctl_old_download_req) begin	//rising edge of download request
 				bridge_req<=0;
-				ioctl_state<=1;
-				ioctl_download<=1;						//mark download active
-				ioctl_size<=dataslot_update_size_s;	//store file size
-				ioctl_id<=dataslot_update_id_s;			//store file ID
-				ioctl_addr<=32'h0;						//set address to start
-				ioctl_wr<=0;								//byte not ready yet				
+				
+				ioctl_download<=1;		
+				ioctl_size<=ioctl_size_req;	//store file size
+				ioctl_id<=ioctl_id_req;			//store file ID
+				ioctl_addr<=0;				
+				ioctl_wr<=0;								//byte not ready yet
+				if (ioctl_addr_l_req==32'hFFFFFFFF) begin
+					ioctl_state<=11;		//loading filename
+					ioctl_addr_offset<=48'h0;						//set address to start
+				end
+				else begin
+					ioctl_state<=1;		//load actual data
+					ioctl_addr_offset<={ioctl_addr_h_req,ioctl_addr_l_req};						//set address to start					
+				end
 			end
+		/*	if (ioctl_upload_req & ~ioctl_old_upload_req) begin	//rising edge of upload request
+				bridge_req<=0;
+								
+				ioctl_size<=ioctl_size_req;	//store file size
+				ioctl_id<=ioctl_id_req;			//store file ID
+				ioctl_addr<=0;				
+				ioctl_wr<=0;								//byte not ready yet
+				if (ioctl_addr_l_req==32'hFFFFFFFE) begin
+					ioctl_state<=16;		//saving config
+					ioctl_addr_offset<=48'h0;						//set address to start
+				end
+				else begin
+					ioctl_state<=0;		//for now - just silently fail
+					//ioctl_addr_offset<={ioctl_addr_h_req,ioctl_addr_l_req};						//set address to start					
+					//ioctl_download<=1;				//don't need a separate upload flag, just reuse the download one	
+				end
+			end*/
 		end
-		4'd1: begin	//load next block of data into bridgeram
+		'd1: begin	//load next block of data into bridgeram
 				target_dataslot_id<=ioctl_id;
-				target_dataslot_slotoffset<=ioctl_addr;									//set address offset into file
-				target_dataslot_bridgeaddr<=32'h60000000;										//set address of bridgeram
+				target_dataslot_slotoffset<=ioctl_addr_offset[31:0];//ioctl_addr;									//set address offset into file
+				target_dataslot_slotoffset_48<=ioctl_addr_offset[47:32];//ioctl_addr;									//set address offset into file
+				//if (ioctl_id=='h100) target_dataslot_bridgeaddr<=32'h70000000; else target_dataslot_bridgeaddr<=32'h60000000;										//set address of bridgeram
+				target_dataslot_bridgeaddr<=32'h60000000;
 				if (ioctl_size>=32'd1024) begin
 					target_dataslot_length<=32'd1024;  //set length to bridgeram size unless remaining file is smaller
 					ioctl_size<=ioctl_size-32'd1024;
@@ -2580,33 +2957,38 @@ if (!ioctl_wait) begin		//make sure core isn't asserting wait
 					ioctl_bytes_to_send<=ioctl_size[9:0]-10'd1;
 					ioctl_size<=32'd0;
 				end				
-				target_dataslot_read<=1;	//tell bridge to read bytes into BRAM
+				if (ioctl_id=='h200) target_dataslot_read<=1; else target_dataslot_read_48<=1;	//tell bridge to read bytes into BRAM( does't use large file size for ROM)
 				bridge_req<=1;	
 				bridge_wstrb<=1;				//write data						
 				ioctl_state<=2;
 		end		
-		4'd2: begin		//extra cycle to ensure request is synced			
+		'd2: begin		//extra cycle to ensure request is synced			
 				ioctl_state<=3;			
 		end		
-		4'd3: begin		//wait until bridge acknowledges cmd
+		'd3: begin		//wait until bridge acknowledges cmd
 			bridge_wstrb<=0;				
 			bridge_req<=~bridge_req;	//while idle -> toggle request line to check for updates			
 			if (target_dataslot_ack_s) begin				
 				ioctl_state<=4;
-				bridge_req<=0;							
+				bridge_req<=0;	
+			   //target_dataslot_read<=0;
+				//if (ioctl_id=='h200) 
+				target_dataslot_read<=0;
+				target_dataslot_read_48<=0;
 			end
 		end
-		4'd4: begin		//wait until data read is finished						
+		'd4: begin		//wait until data read is finished						
 			bridge_req<=~bridge_req;	//while idle -> toggle request line to check for updates			
 			if (target_dataslot_done_s) begin				
 				ioctl_state<=5;
 				bridge_req<=0;							
 			end
 		end
-		4'd5: begin		//extra cycle to stablise read before writing data			
+		'd5: begin		//extra cycle to stablise read before writing data			
+			//if (ioctl_id=='h100) ioctl_state<=11; else 
 			ioctl_state<=6;
 		end				
-		4'd6: begin		//start sending data via ioctl_dout						
+		'd6: begin		//start sending data via ioctl_dout						
 				case (ioctl_addr[1:0])
 					2'b11:	ioctl_dout<=bridgeram_rd_data_ioctl[31:24];
 					2'b10:	ioctl_dout<=bridgeram_rd_data_ioctl[23:16];
@@ -2615,25 +2997,27 @@ if (!ioctl_wait) begin		//make sure core isn't asserting wait
 				endcase				
 				if (ram_ready) ioctl_state<=7;	
 		end
-		4'd7: begin		//extra cycle to stablise read before updating address
-			ioctl_wr<=1;			
-			ioctl_state<=9;
-		end
-		4'd9: begin		//extra cycle to stablise read before updating address
+		'd7: begin		//extra cycle to stablise read before updating address
 			ioctl_wr<=1;			
 			ioctl_state<=8;
+		end
+		'd8: begin		//extra cycle to stablise read before updating address
+			ioctl_wr<=1;			
+			ioctl_state<=9;
 		end		
-		4'd8: begin		//update address			
+		'd9: begin		//update address			
 			ioctl_wr<=0;						
 				ioctl_addr<=ioctl_addr+32'd1;
+				ioctl_addr_offset<=ioctl_addr_offset+48'd1;
 				if (ioctl_bytes_to_send==0) begin		//all bytes from last read have sent
 					if (ioctl_size==0) begin	//done
 						ioctl_download<=0;		//turn off download flag
-						ioctl_state<=0;			//go backto IDLE						
-						if (ioctl_id==16'h200) begin
+						ioctl_complete<=1;		//flag complete
+						ioctl_state<=10;			//wait for soft cpu to ack						
+						/*if (ioctl_id==16'h200) begin
 							rom_loaded<=1;
 							//ioctl_addr<=32'hffffffff;
-						end
+						end*/
 					end
 					else
 					begin
@@ -2646,7 +3030,70 @@ if (!ioctl_wait) begin		//make sure core isn't asserting wait
 					ioctl_bytes_to_send<=ioctl_bytes_to_send-10'd1;
 				end			
 			end
+		'd10: begin		//wait for soft CPU ack
+			if (pico_ioctl_complete_ack) begin
+				ioctl_complete<=0;		//clear complete
+				ioctl_state<=0;			//go back to IDLE						
+			end
+		end
+		'd11: begin	//load filename bridgeram
+				target_dataslot_id<=ioctl_id;				
+				target_buffer_resp_struct<=32'h70000000;
+				target_dataslot_getfile<=1;	//tell bridge to read bytes into BRAM
+				bridge_req<=1;	
+				bridge_wstrb<=1;				//write data						
+				ioctl_state<=12;				
+		end		
+		'd12: begin		//extra cycle to ensure request is synced			
+				ioctl_state<=13;			
+		end						
+		'd13: begin		//wait until bridge acknowledges cmd
+			bridge_wstrb<=0;				
+			bridge_req<=~bridge_req;	//while idle -> toggle request line to check for updates			
+			if (target_dataslot_ack_s) begin				
+				ioctl_state<=14;
+				bridge_req<=0;	
+			   target_dataslot_getfile<=0;				
+			end
+		end
+		'd14: begin		//wait until data read is finished						
+			bridge_req<=~bridge_req;	//while idle -> toggle request line to check for updates			
+			if (target_dataslot_done_s) begin				
+				ioctl_state<=15;
+				bridge_req<=0;							
+			end
+		end
+		'd15: begin		//extra cycle to stablise read before writing data			
+			ioctl_download<=0;		//turn off download flag
+			ioctl_complete<=1;		//flag complete
+			ioctl_state<=10;
+		end				
+	/*	'd16: begin		//set filename for config output
+				target_dataslot_id<=ioctl_id;				
+				target_buffer_param_struct<=32'h70000000;
+				target_dataslot_openfile<=1;	//tell bridge to read bytes into BRAM
+				bridge_req<=1;	
+				bridge_wstrb<=1;				//write data						
+				ioctl_state<=17;				
+		end
+		'd17: begin		//wait until bridge acknowledges cmd
+			bridge_wstrb<=0;				
+			bridge_req<=~bridge_req;	//while idle -> toggle request line to check for updates			
+			if (target_dataslot_ack_s) begin				
+				ioctl_complete<=1;
+				ioctl_state<=10;//18;
+				bridge_req<=0;	
+			   target_dataslot_openfile<=0;				
+			end
+		end*/
+		/*'d18: begin		//extra cycle to stablise read before writing data			
+			ioctl_download<=0;		//turn off download flag
+			ioctl_complete<=1;		//flag complete
+			ioctl_state<=10;
+		end				*/
 	endcase
+	ioctl_old_download_req<=ioctl_download_req;
+	ioctl_old_upload_req<=ioctl_upload_req;
 end
 end
 
