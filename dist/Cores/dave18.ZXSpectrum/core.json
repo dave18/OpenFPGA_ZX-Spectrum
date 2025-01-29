@@ -4,11 +4,11 @@
         "metadata": {
             "platform_ids": ["zxspectrum"],
             "shortname": "ZXSpectrum",
-            "description": "My first attempt at a ZX Spectrum 48K Core",
+            "description": "Port of MiSTer ZX Spectrum Core",
             "author": "dave18",
             "url": "",
-            "version": "0.0.1",
-            "date_release": "2024-08-14"
+            "version": "0.4.0-beta",
+            "date_release": "2025-01-29"
         },
         "framework": {
             "target_product": "Analogue Pocket",

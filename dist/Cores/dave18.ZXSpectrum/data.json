@@ -3,50 +3,41 @@
         "magic": "APF_VER_1",
         "data_slots": [
     {
-        "name": " SNA",
-        "id": "3",
-        "required": false,
-        "deferload": true,
-        "parameters": 9,
-        "filename": "",
-        "extensions": ["sna"]
-    },
-    {
-        "name": " Z80",
-        "id": "4",
-        "required": false,
-        "deferload": true,
-        "parameters": 9,
-        "filename": "",
-        "extensions": ["z80"]
-    },
-    {
-        "name": " Tape (TAP)",
-        "id": "0",
-        "required": false,
-        "deferload": true,
-        "parameters": 9,
-        "filename": "",
-        "extensions": ["tap"]
-    },
-	{
-        "name": " Tape (CSW)",
+        "name": " Disk",
         "id": "1",
         "required": false,
         "deferload": true,
         "parameters": 9,
         "filename": "",
-        "extensions": ["csw"]
+        "extensions": ["trd","img","dsk","mgt"]
     },
-	{
-        "name": " Tape (TZX)",
+    {
+        "name": " Tape",
         "id": "2",
         "required": false,
         "deferload": true,
         "parameters": 9,
         "filename": "",
-        "extensions": ["tzx"]
-    },	
+        "extensions": ["tap","csw","tzx"]
+    },
+    {
+        "name": " Snapshot",
+        "id": "4",
+        "required": false,
+        "deferload": true,
+        "parameters": 9,
+        "filename": "",
+        "extensions": ["z80","sna"]
+    },
+	{
+        "name": " DivMMC",
+        "id": "3",
+        "required": false,
+        "deferload": true,
+        "parameters": 9,
+        "filename": "",
+        "extensions": ["vhd"]
+    },
 	{
         "name": "ROM",
         "id": "0x200",
@@ -56,6 +47,15 @@
         "filename": "boot.rom",
         "extensions": ["rom"],
         "address": "0x00000000"
+    },
+	{
+        "name": "CFG",
+        "id": "0x400",
+        "required": false,
+        "deferload": true,
+        "parameters": 2,			
+        "filename": "",
+        "extensions": ["cfg"]        
     }
     ]
     }
