@@ -51,6 +51,11 @@ L Trig & Select - Issue NMI
 
 ### Change Log
 
+### v0.4.0-beat
+
+Fixed General Sound Hardware
+Adjusted timing contraints to (hopefully) fix issues some people were experiencing
+
 ### v0.3.0-beta
 
 Added disk drives
