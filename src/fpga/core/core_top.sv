@@ -235,7 +235,7 @@ assign bridge_endian_little = 0;
 
 // cart is unused, so set all level translators accordingly
 // directions are 0:IN, 1:OUT
-assign cart_tran_bank3 = 8'hzz;
+assign cart_tran_bank3 = 8'hzz;//{4'b0000,debugclk,ce_7mp,pix_clk,pix_clk_90};//8'hzz;
 assign cart_tran_bank3_dir = 1'b0;
 assign cart_tran_bank2 = 8'hzz;
 assign cart_tran_bank2_dir = 1'b0;
@@ -857,7 +857,7 @@ wire [14:0] gs_l, gs_r;
 reg ce_gs = 0;
 always @(posedge clk_aud) ce_gs <= ~ce_gs;
 
-gs #("rtl/gs105b.mif") gs
+gs #("core/gs105b.mif") gs
 (
 	.RESET(aud_reset),
 	.CLK(clk_aud),
@@ -886,7 +886,8 @@ wire  [7:0] gs_mem_dout;
 wire  [7:0] gs_mem_din;
 wire        gs_mem_rd;
 wire        gs_mem_wr;
-wire        gs_mem_ready=1'b1;
+wire        gs_mem_busy;
+wire        gs_mem_ready=~gs_mem_busy;
 reg   [7:0] gs_mem_mask;
 
 always_comb begin
@@ -912,10 +913,10 @@ ddram ddram
 );*/
 
 
-assign	cram0_a[21:16]={1'b0,gs_mem_addr[20:16]};
+/*assign	cram0_a[21:16]={1'b0,gs_mem_addr[20:16]};
 assign	gs_mem_dout=cram0_dq[7:0];
 assign	cram0_dq=gs_mem_wr?{gs_mem_din,gs_mem_din}:gs_mem_rd?{16{1'bZ}}:gs_mem_addr[15:0];
-assign	cram0_ub_n=1;
+assign	cram0_ub_n=0;
 assign	cram0_lb_n=0;
 assign	cram0_we_n=~gs_mem_wr;
 assign	cram0_oe_n=~gs_mem_rd;
@@ -924,6 +925,57 @@ assign	cram0_ce1_n=0;
 assign	cram0_cre=0;
 assign	cram0_clk = 0;
 assign	cram0_adv_n = 1;
+*/
+  // Generate a clock enable signal in the 32MHz domain that is aligned with
+  // the corresponding clk_8mhz_1mhz_ph[12]_en signals in the 8MHz domain.
+  /*reg [3:0] clk_32mhz_cntr;
+  wire clk_32mhz_1mhz_ph12_en;
+  assign clk_32mhz_1mhz_ph12_en = clk_32mhz_cntr[3:0] == 0;
+  always @(posedge clk_32mhz) begin
+    if (rst) clk_32mhz_cntr <= 10; // XXX: This is a bit arbitrary but BAD: 13,0,15 GOOD: 10
+    else clk_32mhz_cntr <= clk_32mhz_cntr + 1;
+  end*/
+
+  // Then use it to synchronize transactions of the PSRAM controller to the two
+  // phases of the C64 core. Since clk_8mhz and clk_32mhz are 'related
+  // clocks' the tools should take care of the rest (I hope).
+  /*wire psram_wen;
+  assign psram_wen = clk_32mhz_1mhz_ph12_en & (ext_rom_cart_we | c64_cart_we);
+  wire psram_ren;
+  assign psram_ren = clk_32mhz_1mhz_ph12_en & ~(ext_rom_cart_we | c64_cart_we);*/
+
+  psram #(
+    .CLOCK_SPEED(56)
+  ) u_psram (
+    .clk(clk_aud),
+    .bank_sel(1'b0),
+    .addr({1'b0,gs_mem_addr}),
+    .write_en(gs_mem_wr),
+    .data_in({gs_mem_din,gs_mem_din}),
+    .write_high_byte(1'b0),
+    .write_low_byte(1'b1),
+
+    .read_en(gs_mem_rd),
+    .read_avail(),
+    .data_out(gs_mem_dout[7:0]),
+
+    .busy(gs_mem_busy),
+
+    // PSRAM signals
+    .cram_a(cram0_a),
+    .cram_dq(cram0_dq),
+    .cram_wait(cram0_wait),
+    .cram_clk(cram0_clk),
+    .cram_adv_n(cram0_adv_n),
+    .cram_cre(cram0_cre),
+    .cram_ce0_n(cram0_ce0_n),
+    .cram_ce1_n(cram0_ce1_n),
+    .cram_oe_n(cram0_oe_n),
+    .cram_we_n(cram0_we_n),
+    .cram_ub_n(cram0_ub_n),
+    .cram_lb_n(cram0_lb_n)
+  );
+
 
 //output  wire    [21:16] cram0_a,
 //inout   wire    [15:0]  cram0_dq,
@@ -1006,7 +1058,7 @@ assign AUDIO_R = audio_r;
 	// Timex mode
 	input         tmx_avail,
 	output reg    mode512,
-
+vv
 	// Misc. signals
 	input         snow_ena,
 	input         mZX,
@@ -1049,6 +1101,7 @@ wire       tmx_avail = ~status[13] & ~trdos_en;
 wire       snow_ena = status[25] & &turbo & ~plus3;
 wire       I,R,G,B;
 wire [7:0] ulap_color;
+wire		debugclk;
 	
 //ULA ULA(.*, .din(cpu_dout), .page_ram(page_ram[2:0]));
 ULA ULA(.*, .din(cpu_dout), .page_ram(page_ram[2:0]),	.HOut(ULA_HC),.VOut(ULA_VC),.borderon(~status[4]));

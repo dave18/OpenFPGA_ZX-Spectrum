@@ -13,9 +13,13 @@ set_clock_groups -asynchronous \
  -group { ic|mp1|mf_pllbase_inst|altera_pll_i|general[0].gpll~PLL_OUTPUT_COUNTER|divclk } \
  -group { ic|mp1|mf_pllbase_inst|altera_pll_i|general[1].gpll~PLL_OUTPUT_COUNTER|divclk } 
 
+#create_clock -name {core_top:ic|ce_7mp} -period 142.857 -waveform {0.000 17.857} [get_nets {ic|ce_7mp}]
+create_clock -name {core_top:ic|pix_clk} -period 142.857 -waveform {0.000 71.429} [get_nets {ic|pix_clk}]
+create_clock -name {core_top:ic|pix_clk_90} -period 142.857 -waveform {35.714 107.143} [get_nets {ic|pix_clk_90}]
  
-create_clock -name {core_top:ic|ULA:ULA|CPUClk} -period 17.857
-#create_clock -name {core_top:ic|ULA:ULA|CPUClk} -period 17.857 -waveform {0 8.929}
+#create_clock -name {core_top:ic|ULA:ULA|CPUClk} -period 17.857 [get_nets {ic|ULA:ULA|CPUClk}]
+
+#create_clock -name {core_top:ic|ULA:ULA|CPUClk} -period 285.714 -waveform {0 142.857} [get_nets {ic|ULA:ULA|CPUClk}]
  
 set clk_sys {ic|mp1|mf_pllbase_inst|altera_pll_i|general[0].gpll~PLL_OUTPUT_COUNTER|divclk}
 set clk_56m {ic|mp1|mf_pllbase_inst|altera_pll_i|general[1].gpll~PLL_OUTPUT_COUNTER|divclk}
@@ -29,6 +33,12 @@ set_multicycle_path -from {ic|cpu|*} -hold 1
 
 set_multicycle_path -to   {ic|cpu|*} -setup 2
 set_multicycle_path -to   {ic|cpu|*} -hold 1
+
+set_multicycle_path -from {ic|u_cpu|*} -setup 2
+set_multicycle_path -from {ic|u_cpu|*} -hold 1
+
+set_multicycle_path -to   {ic|u_cpu|*} -setup 2
+set_multicycle_path -to   {ic|u_cpu|*} -hold 1
 
 # The CE is only active in every 2 clocks, so allow 2 clock cycles
 set_multicycle_path -from {ic|tape|*} -setup 2
@@ -91,17 +101,17 @@ set_false_path -from {ic|p1024}
 set_false_path -from {ic|pf1024}
 #set_false_path -from {ic|hps_io|status[*]}
 
-set_false_path -from {ic|page_reg_plus3*}
-set_false_path -from {ic|page_reg_plus3[*]}
-set_false_path -from {ic|page_reg_plus3*}
-set_false_path -from {core_top:ic|u765:u765|*}
-set_false_path -from {core_top:ic|u765:u765|i_bytes_to_read*}
-set_false_path -from {core_top:ic|u765:u765|i_bytes_to_read[*]}
-set_false_path -to {core_top:ic|u765:u765|next_weak_sector*}
-set_false_path -to {core_top:ic|u765:u765|next_weak_sector[*]}
-set_false_path -to {core_top:ic|u765:u765|next_weak_sector[*][*]}
-#set_false_path -to {core_top:ic|ULA:ULA|INT}
-set_false_path -from {core_top:ic|m128} -to {core_top:ic|ULA:ULA|AttrOut[*]}
+#set_false_path -from {ic|page_reg_plus3*}
+#set_false_path -from {ic|page_reg_plus3[*]}
+#set_false_path -from {ic|page_reg_plus3*}
+#set_false_path -from {core_top:ic|u765:u765|*}
+#set_false_path -from {core_top:ic|u765:u765|i_bytes_to_read*}
+#set_false_path -from {core_top:ic|u765:u765|i_bytes_to_read[*]}
+#set_false_path -to {core_top:ic|u765:u765|next_weak_sector*}
+#set_false_path -to {core_top:ic|u765:u765|next_weak_sector[*]}
+#set_false_path -to {core_top:ic|u765:u765|next_weak_sector[*][*]}
+##set_false_path -to {core_top:ic|ULA:ULA|INT}
+#set_false_path -from {core_top:ic|m128} -to {core_top:ic|ULA:ULA|AttrOut[*]}
 
 
 
