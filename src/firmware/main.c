@@ -404,10 +404,11 @@ void encode_status() {
 	status_bits[39]=menuListVals[0x0a] & 0x01;		//PSG/FM 39
 	status_bits[40]=menuListVals[0x0b] & 0x01;		//PSG Stereo 40
 	status_bits[41]=menuListVals[0x0c] & 0x01;		//PSG Model 41
+	status_bits[42]=(menuType[1] [7]>>24) & 0x01;	//Disk LED
 	
 	uint32_t i;
 	
-	for (i=42;i<64;i++) { //zero unused bits
+	for (i=43;i<64;i++) { //zero unused bits
 		status_bits[i]=0;
 	}
 	
@@ -461,6 +462,7 @@ void decode_status() {
 	menuListVals[0x0a]=status_bits[39]; 							//PSG/FM 39
 	menuListVals[0x0b]=status_bits[40]; 							//PSG Stereo 40
 	menuListVals[0x0c]=status_bits[41]; 							//PSG Model 41
+	menuType[1] [7]=updateMenuType(menuType[1] [1],status_bits[42]);	//Disk LED on/off
 	
 
 	if (menu_on) writeMenu();
@@ -568,7 +570,8 @@ void initMenus() {
 	strcpyr(&menuItems[1] [4] [0],"PSG/FM:");
 	strcpyr(&menuItems[1] [5] [0],"PSG Stereo:");
 	strcpyr(&menuItems[1] [6] [0],"PSG Mode:");
-	strcpyr(&menuItems[1] [7] [0],"END");
+	strcpyr(&menuItems[1] [7] [0],"Disk LED:");
+	strcpyr(&menuItems[1] [8] [0],"END");
 	
 	menuType[1] [0] = 0x00000011;
 	menuType[1] [1] = 0x00000412;
@@ -627,6 +630,8 @@ void initMenus() {
 	strcpyr(&menuLists[0x0c] [0] [0],"YM2149");
 	strcpyr(&menuLists[0x0c] [1] [0],"AY8910");
 	menuListVals[0x0c]=0;
+	
+	menuType[1] [7] = 0x0000043f;
 	
 	strcpyr(&menuItems[2] [0] [0],"HARDWARE");
 	strcpyr(&menuItems[2] [1] [0],"Port #FE:");
@@ -899,7 +904,7 @@ void process_menu(uint32_t mask) {
 		
 		
 		if (mt==9) {
-			status0 &= 0xfffffffe;	//cleasr reset flag
+			status0 &= 0xfffffffe;	//clear reset flag
 			IO_RW(IO_STATUS0)=status0;
 		}
 		
@@ -1190,16 +1195,22 @@ void setKeyboardMatrix(int kx,int ky) {
 			
 }
 
-
+//int nmi=0;
 void processInput()
 {
 	uint32_t mask=readJoypad();		
 	if (mask==0) joyclear=1; 	//debounce
 	int kb_press;
 	int mod_press;
+	
+	
 	if (inputDelay) inputDelay--;
 	
-	IO_RW(SEND_FKEYS)=0x0;
+	//if (nmi) nmi--;
+	//if (nmi==0) {
+		 IO_RW(SEND_FKEYS)=0x0;
+	//}
+		
 	
 	
 	if ((mask & L_TRIG) && (mask & START) && (joyclear==1))	{
@@ -1212,10 +1223,12 @@ void processInput()
 	//0 = RShift
 	//1 = Alt
 	//2 = Ctrl
-	if ((mask & L_TRIG) && (mask & SELECT) && (joyclear==1))	{		
-		IO_RW(SEND_FKEYS)=0x00400;
-		joyclear=0;		
-	}// else {IO_RW(SEND_FKEYS)=0x0;};
+	
+	if ((mask & L_TRIG) && (mask & SELECT) && (joyclear==1))	{				
+		//nmi=32;
+		joyclear=0;			
+		IO_RW(SEND_FKEYS)=0x00400;		
+	}
 	
 	
 	
@@ -1326,6 +1339,7 @@ void processInput()
 	
 	
 	if (menu_on) process_menu(mask);
+
 		
 	
 }
