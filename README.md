@@ -51,7 +51,14 @@ L Trig & Select - Issue NMI
 
 ### Change Log
 
-### v0.4.0-beat
+### v0.5.0-beta
+
+Fixed sound output (signed rather the unsigned output)
+Fixed - NMI shortcut using Left Shoulder + Select
+Added - Optional disk LED indicator
+and more changes to timing constraints to improve compatability across devices
+
+### v0.4.0-beta
 
 Fixed General Sound Hardware
 Adjusted timing contraints to (hopefully) fix issues some people were experiencing
