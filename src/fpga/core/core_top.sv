@@ -1101,7 +1101,6 @@ wire       tmx_avail = ~status[13] & ~trdos_en;
 wire       snow_ena = status[25] & &turbo & ~plus3;
 wire       I,R,G,B;
 wire [7:0] ulap_color;
-wire		debugclk;
 	
 //ULA ULA(.*, .din(cpu_dout), .page_ram(page_ram[2:0]));
 ULA ULA(.*, .din(cpu_dout), .page_ram(page_ram[2:0]),	.HOut(ULA_HC),.VOut(ULA_VC),.borderon(~status[4]));
@@ -1198,13 +1197,24 @@ wire [8:0] ULA_VC;
 wire osd_out;
 wire [14:0] osd_address=((ULA_VC-OSDY)*256) + (ULA_HC-OSDX) ;
 
+reg fdc_led;
+always @(posedge CLK_VIDEO) begin
+ if (ULA_VC==240) fdc_led<=fdc_sel;
+end
+
 //Translation of 4 bit colour (Bright bit + 3 bit GBR)
 //wire [23:0] video_translate=I?{R,R,R,R,R,R,R,R,G,G,G,G,G,G,G,G,B,B,B,B,B,B,B,B}:{R,R,1'b0,R,R,3'b000,G,G,1'b0,G,G,3'b000,B,B,1'b0,B,B,3'b000};
 wire [23:0] video_translate={Rx,Gx,Bx};
 wire in_OSD_Area=((ULA_HC >= OSDX) && (ULA_HC < OSDX+OSDW) && (ULA_VC >= OSDY) && (ULA_VC < OSDY+OSDH));
+
+wire in_LED_Area=((ULA_HC >= 280) && (ULA_HC < 296) && (ULA_VC >= 200) && (ULA_VC < 208) && (!status[42]));
+wire [23:0] LED_State=fdc_led?24'hff0000:24'h400000;
+
 wire [23:0] video_inc_OSD_mask=in_OSD_Area?video_translate & 24'b010111110101111101011111:video_translate;
 wire [23:0] video_inc_OSD=(in_OSD_Area & osd_out)?24'b111111111111111111111111:video_inc_OSD_mask;
-wire [23:0] video_final=osd_active?video_inc_OSD:video_translate;
+//wire [23:0] video_final=osd_active?video_inc_OSD:video_translate;
+wire [23:0] video_pre_led=osd_active?video_inc_OSD:video_translate;
+wire [23:0] video_final=in_LED_Area?LED_State:video_pre_led;
 //wire vblank_frame=new_border_mode?{10'd0,status[4],10'd0,3'd0}:24'd0;		//change scaler slot if needed
 assign video_rgb=video_rgb_reg;//de?video_final:vblank_frame;
 
@@ -1870,7 +1880,7 @@ always @* begin
 		joykey_data[7]=5'b11111;
 	end
 
-	if (cont1_key_s[8]) begin  //L
+	if (cont1_key_s[8] & ~cont1_key_s[14]) begin  //L	-- need to disable when usign L + Select Combo to issue NMI!
 		joykey_data[8] [4] = ~((~joykb_keyrowFE[8] [4] & ~addr[8]) | (~joykb_keyrowFD[8] [4] & ~addr[9]) | (~joykb_keyrowFB[8] [4] & ~addr[10]) | (~joykb_keyrowF7[8] [4] & ~addr[11]) | (~joykb_keyrowEF[8] [4] & ~addr[12]) | (~joykb_keyrowDF[8] [4] & ~addr[13]) | (~joykb_keyrowBF[8] [4] & ~addr[14]) | (~joykb_keyrow7F[8] [4] & ~addr[15]));
 		joykey_data[8] [3] = ~((~joykb_keyrowFE[8] [3] & ~addr[8]) | (~joykb_keyrowFD[8] [3] & ~addr[9]) | (~joykb_keyrowFB[8] [3] & ~addr[10]) | (~joykb_keyrowF7[8] [3] & ~addr[11]) | (~joykb_keyrowEF[8] [3] & ~addr[12]) | (~joykb_keyrowDF[8] [3] & ~addr[13]) | (~joykb_keyrowBF[8] [3] & ~addr[14]) | (~joykb_keyrow7F[8] [3] & ~addr[15]));
 		joykey_data[8] [2] = ~((~joykb_keyrowFE[8] [2] & ~addr[8]) | (~joykb_keyrowFD[8] [2] & ~addr[9]) | (~joykb_keyrowFB[8] [2] & ~addr[10]) | (~joykb_keyrowF7[8] [2] & ~addr[11]) | (~joykb_keyrowEF[8] [2] & ~addr[12]) | (~joykb_keyrowDF[8] [2] & ~addr[13]) | (~joykb_keyrowBF[8] [2] & ~addr[14]) | (~joykb_keyrow7F[8] [2] & ~addr[15]));
@@ -2837,7 +2847,7 @@ end*/
       .vol_att(0),
       .mix(status[3:2]),
 
-      .is_signed(0),
+      .is_signed(1),
       .core_l(audio_buffer_l),
       .core_r(audio_buffer_r),
 

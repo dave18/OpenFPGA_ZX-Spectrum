@@ -16,10 +16,8 @@ set_clock_groups -asynchronous \
 #create_clock -name {core_top:ic|ce_7mp} -period 142.857 -waveform {0.000 17.857} [get_nets {ic|ce_7mp}]
 create_clock -name {core_top:ic|pix_clk} -period 142.857 -waveform {0.000 71.429} [get_nets {ic|pix_clk}]
 create_clock -name {core_top:ic|pix_clk_90} -period 142.857 -waveform {35.714 107.143} [get_nets {ic|pix_clk_90}]
- 
-#create_clock -name {core_top:ic|ULA:ULA|CPUClk} -period 17.857 [get_nets {ic|ULA:ULA|CPUClk}]
 
-#create_clock -name {core_top:ic|ULA:ULA|CPUClk} -period 285.714 -waveform {0 142.857} [get_nets {ic|ULA:ULA|CPUClk}]
+create_clock -name {core_top:ic|ULA:ULA|CPUClk} -period 285.714 -waveform {0 142.857} [get_nets {ic|ULA:ULA|CPUClk}]
  
 set clk_sys {ic|mp1|mf_pllbase_inst|altera_pll_i|general[0].gpll~PLL_OUTPUT_COUNTER|divclk}
 set clk_56m {ic|mp1|mf_pllbase_inst|altera_pll_i|general[1].gpll~PLL_OUTPUT_COUNTER|divclk}
@@ -89,6 +87,7 @@ set_multicycle_path -to   {ic|saa1099|*} -setup 2
 set_multicycle_path -to   {ic|saa1099|*} -hold 1
 
 set_false_path -from {ic|init_reset}
+set_false_path -from {core_top:ic|pause_z80}
 #set_false_path -from {ic|hps_io|cfg*}
 #set_false_path -from {ic|hps_io|status*}
 set_false_path -from {ic|arch_reset}
@@ -101,6 +100,7 @@ set_false_path -from {ic|p1024}
 set_false_path -from {ic|pf1024}
 #set_false_path -from {ic|hps_io|status[*]}
 
+set_false_path -from {core_top:ic|ULA:ULA|*} -to {core_top:ic|osdram:osdram|*}
 #set_false_path -from {ic|page_reg_plus3*}
 #set_false_path -from {ic|page_reg_plus3[*]}
 #set_false_path -from {ic|page_reg_plus3*}
