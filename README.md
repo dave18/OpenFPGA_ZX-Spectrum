@@ -53,7 +53,7 @@ L Trig & Select - Issue NMI
 
 ### v0.5.0-beta
 
-Fixed sound output (signed rather the unsigned output)
+Fixed sound output (signed rather than unsigned output)
 Fixed - NMI shortcut using Left Shoulder + Select
 Added - Optional disk LED indicator
 and more changes to timing constraints to improve compatability across devices
