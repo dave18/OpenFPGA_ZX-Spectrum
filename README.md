@@ -51,6 +51,10 @@ L Trig & Select - Issue NMI
 
 ### Change Log
 
+### v0.6.0-beta
+
+Changed SDRAM to AGG23's version to fix timings on some Pockets
+
 ### v0.5.0-beta
 
 Fixed sound output (signed rather than unsigned output)
