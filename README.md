@@ -51,6 +51,20 @@ L Trig & Select - Issue NMI
 
 ### Change Log
 
+### v0.7.0-beta
+
+Reverted to a version of the MiSTER SDRAM controller but adapted to AGG23's timings to fix compatability with Turbo modes
+
+Added - New Tape menu
+
+Added - Tape Pause/Prev/Next options
+
+Fixed - Tape sound on/off not working
+
+Fixed - Kempston inputs still active while Virtual Keyboard displayed
+
+Fixed - Auto-typing of LOAD ""
+
 ### v0.6.0-beta
 
 Changed SDRAM to AGG23's version to fix timings on some Pockets
@@ -58,13 +72,17 @@ Changed SDRAM to AGG23's version to fix timings on some Pockets
 ### v0.5.0-beta
 
 Fixed sound output (signed rather than unsigned output)
+
 Fixed - NMI shortcut using Left Shoulder + Select
+
 Added - Optional disk LED indicator
+
 and more changes to timing constraints to improve compatability across devices
 
 ### v0.4.0-beta
 
 Fixed General Sound Hardware
+
 Adjusted timing contraints to (hopefully) fix issues some people were experiencing
 
 ### v0.3.0-beta
