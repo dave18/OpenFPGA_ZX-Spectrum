@@ -316,12 +316,12 @@ int writeMenu()
 			l=strlen(&menuLists [v] [menuListVals[v]] [0]); //get length of text
 			writeString(&menuLists [v] [menuListVals[v]] [0],osd_width-(l*8)-8,y);
 		}
-		if (((menuType[currmenu] [i+1] >> 8) & 0xff) == 3) { //list			
-			v=(menuType[currmenu] [i+1] >> 24) & 0xff; //get list id
+		if (((menuType[currmenu] [i+1] >> 8) & 0xff) == 3) { //yes/no
+			v=(menuType[currmenu] [i+1] >> 24) & 0xff; //get state
 			if (v) writeString("Yes",osd_width-(3*8)-8,y); else writeString(" No",osd_width-(3*8)-8,y);
 		}
-		if (((menuType[currmenu] [i+1] >> 8) & 0xff) == 4) { //list			
-			v=(menuType[currmenu] [i+1] >> 24) & 0xff; //get list id
+		if (((menuType[currmenu] [i+1] >> 8) & 0xff) == 4) { //on/off		
+			v=(menuType[currmenu] [i+1] >> 24) & 0xff; //get state
 			if (v) writeString("Off",osd_width-(3*8)-8,y); else writeString(" On",osd_width-(3*8)-8,y);
 		}
 		i++;
@@ -362,13 +362,13 @@ void encode_status() {
 
 */
 	status_bits[0]=0;		//assume no reset
-	status_bits[1]=(menuType[0] [8]>>24) & 0x01;	//tape sound
+	status_bits[1]=(menuType[5] [5]>>24) & 0x01;	//tape sound
 	status_bits[2]=menuListVals[0x09] & 0x01;		//stereo mix 2-3
 	status_bits[3]=(menuListVals[0x09] >>1) & 0x01;
 	/*status_bits[4]=menuListVals[0x04] & 0x01;		//aspect ratio 4-5
 	status_bits[5]=(menuListVals[0x04] >>1) & 0x01;*/
 	status_bits[4]=(menuType[1] [1]>>24) & 0x01;	//Border on/off
-	status_bits[6]=(menuType[0] [7]>>24) & 0x01;	//fast tape
+	status_bits[6]=(menuType[5] [4]>>24) & 0x01;	//fast tape
 	status_bits[7]=menuListVals[0x0d] & 0x01;		//Port #FE 7
 	status_bits[8]=menuListVals[0x11] & 0x01;		//video timing 8-9
 	status_bits[9]=(menuListVals[0x11] >>1) & 0x01;
@@ -438,10 +438,10 @@ void decode_status() {
 		status_bits[i+32]=(status1 >> i) & 1;
 	}	
 	
-	menuType[0] [8]=updateMenuType(menuType[0] [8],status_bits[1]);	//tape sound
+	menuType[5] [5]=updateMenuType(menuType[5] [5],status_bits[1]);	//tape sound
 	menuListVals[0x09]=status_bits[2] | (status_bits[3] <<1);		//stereo mix 2-3
 	menuType[1] [1]=updateMenuType(menuType[1] [1],status_bits[4]);	//border on/off 4-5
-	menuType[0] [7]=updateMenuType(menuType[0] [7],status_bits[6]);	//fast tape
+	menuType[5] [4]=updateMenuType(menuType[5] [4],status_bits[6]);	//fast tape
 	menuListVals[0x0d]=status_bits[7]; 								//Port #FE 7
 	menuListVals[0x11]=status_bits[8] | (status_bits[9] <<1);		//video timing 8-9	
 	menuListVals[0x12]=status_bits[10] | (status_bits[11] <<1) | (status_bits[12] <<2);				//Memory 10-12	
@@ -462,7 +462,7 @@ void decode_status() {
 	menuListVals[0x0a]=status_bits[39]; 							//PSG/FM 39
 	menuListVals[0x0b]=status_bits[40]; 							//PSG Stereo 40
 	menuListVals[0x0c]=status_bits[41]; 							//PSG Model 41
-	menuType[1] [7]=updateMenuType(menuType[1] [1],status_bits[42]);	//Disk LED on/off
+	menuType[1] [7]=updateMenuType(menuType[1] [7],status_bits[42]);	//Disk LED on/off
 	
 
 	if (menu_on) writeMenu();
@@ -487,6 +487,7 @@ bits 15-8
 5 = Special (Map joystick)
 6 = Reset F Keys
 7 = Model F Keys
+8 = Tape Optiona
 9 = Reset
 
 bits 23 - 16
@@ -506,13 +507,13 @@ void initMenus() {
 	strcpyr(&menuItems[0] [4] [0],"Joystick:");
 	strcpyr(&menuItems[0] [5] [0],"Map Keyboard Joystick");
 	strcpyr(&menuItems[0] [6] [0],"Mouse:");
-	strcpyr(&menuItems[0] [7] [0],"Fast Tape Load:");
-	strcpyr(&menuItems[0] [8] [0],"Tape Sound:");
-	strcpyr(&menuItems[0] [9] [0],"CPU Speed:");
-	strcpyr(&menuItems[0] [10] [0],"Reset & Apply");
-	strcpyr(&menuItems[0] [11] [0],"Other Reset Options:");
-	strcpyr(&menuItems[0] [12] [0],"Quick Model Select:");
-	strcpyr(&menuItems[0] [13] [0],"END");
+	strcpyr(&menuItems[0] [7] [0],"Tape Options");
+	//strcpyr(&menuItems[0] [8] [0],"Tape Sound:");
+	strcpyr(&menuItems[0] [8] [0],"CPU Speed:");
+	strcpyr(&menuItems[0] [9] [0],"Reset & Apply");
+	strcpyr(&menuItems[0] [10] [0],"Other Reset Options");
+	strcpyr(&menuItems[0] [11] [0],"Quick Model Select");
+	strcpyr(&menuItems[0] [12] [0],"END");
 	
 	menuType[0] [0] = 0x00000001;
 	menuType[0] [1] = 0x01000102;
@@ -540,10 +541,9 @@ void initMenus() {
 	strcpyr(&menuLists[0x02] [2] [0],"Kempston R/L");
 	menuListVals[2]=0;
 		
-	menuType[0] [7] = 0x00000408;
-	menuType[0] [8] = 0x00000409;
+	menuType[0] [7] = 0x05000140;	
 	
-	menuType[0] [9] = 0x0305020a;
+	menuType[0] [8] = 0x0305020a;
 	strcpyr(&menuLists[0x03] [0] [0],"Original");
 	strcpyr(&menuLists[0x03] [1] [0],"    7MHz");
 	strcpyr(&menuLists[0x03] [2] [0],"   14Mhz");
@@ -551,12 +551,12 @@ void initMenus() {
 	strcpyr(&menuLists[0x03] [4] [0],"   56Mhz");	
 	menuListVals[3]=0;
 	
-	menuType[0] [10] = 0x0000090b;
+	menuType[0] [9] = 0x0000090b;
 	
-	menuType[0] [11] = 0x03000102;
-	menuType[0] [12] = 0x04000103;
+	menuType[0] [10] = 0x03000102;
+	menuType[0] [11] = 0x04000103;
 	
-	strcpyr(&menuItems[0] [13] [0],"END");
+	//strcpyr(&menuItems[0] [12] [0],"END");
 	
 	
 	strcpyr(&menuItems[1] [0] [0],"AUDIO & VIDEO");
@@ -694,7 +694,7 @@ void initMenus() {
 	strcpyr(&menuItems[3] [0] [0],"RESET OPTIONS");
 	strcpyr(&menuItems[3] [1] [0],"Warm Reset");
 	strcpyr(&menuItems[3] [2] [0],"Cold Reset (Disk unload)");
-	strcpyr(&menuItems[3] [3] [0],"Reset to ROM0 Menu");
+	strcpyr(&menuItems[3] [3] [0],"Reset to ROM0 0Menu");
 	strcpyr(&menuItems[3] [4] [0],"48K Basic Load (no lock)");
 	strcpyr(&menuItems[3] [5] [0],"48K Basic Load (lock)");
 	strcpyr(&menuItems[3] [6] [0],"Issue NMI");
@@ -727,6 +727,22 @@ void initMenus() {
 	menuType[4] [5] = 0x0000073d;
 	menuType[4] [6] = 0x0000073e;
 	
+	strcpyr(&menuItems[5] [0] [0],"TAPE OPTIONS");
+	strcpyr(&menuItems[5] [1] [0],"Pause/Continue");
+	strcpyr(&menuItems[5] [2] [0],"Previous Part");
+	strcpyr(&menuItems[5] [3] [0],"Next Part");
+	strcpyr(&menuItems[5] [4] [0],"Fast Tape Load:");
+	strcpyr(&menuItems[5] [5] [0],"Tape Sound:");
+	strcpyr(&menuItems[5] [6] [0],"END");
+	
+	menuType[5] [0] = 0x00000041;
+	menuType[5] [1] = 0x00000842;
+	menuType[5] [2] = 0x00000843;
+	menuType[5] [3] = 0x00000844;
+	menuType[5] [4] = 0x00000445;
+	menuType[5] [5] = 0x00000446;
+	
+	
 	
 	
 }
@@ -751,6 +767,16 @@ void drawKeyboard(int kx, int ky) {
 		}
 	}
 };
+
+
+void clearKeyboardMatrix() {
+	for (int r=0;r<8;r++) {			//reset keyboard rows
+		kb_matrix[r]=0xff;			
+	}
+	//if (cap_shift) kb_matrix[0]=0xfe;	//shift							
+	//if (sym_shift) kb_matrix[7]=0xfd;	//shift							
+}
+
 
 int inputDelay=0;
 int pause_on;
@@ -801,14 +827,14 @@ void process_menu(uint32_t mask) {
 				writeMenu();
 			break;
 			case 3:		//yes no
-				v=(menuType[currmenu] [cursorpos] >> 24) & 0xff; //get list id
+				v=(menuType[currmenu] [cursorpos] >> 24) & 0xff; //get current state
 				v=1-v;
 				menuType[currmenu] [cursorpos]&=0x00ffffff;
 				menuType[currmenu] [cursorpos]|=(v<<24);
 				writeMenu();
 			break;
 			case 4:		//on off
-				v=(menuType[currmenu] [cursorpos] >> 24) & 0xff; //get list id
+				v=(menuType[currmenu] [cursorpos] >> 24) & 0xff; //get current state
 				v=1-v;
 				menuType[currmenu] [cursorpos]&=0x00ffffff;
 				menuType[currmenu] [cursorpos]|=(v<<24);
@@ -848,6 +874,9 @@ void process_menu(uint32_t mask) {
 						kb_on=0;
 						menu_on=0;
 						auto_delay=AUTO_KEY_DELAY;
+						clearKeyboardMatrix();
+						cap_shift=0;
+						sym_shift=0;
 					break;
 					case 0x35:
 						IO_RW(SEND_FKEYS)=0x10200;
@@ -856,6 +885,9 @@ void process_menu(uint32_t mask) {
 						kb_on=0;
 						menu_on=0;
 						auto_delay=AUTO_KEY_DELAY;
+						clearKeyboardMatrix();
+						cap_shift=0;
+						sym_shift=0;
 					break;
 					case 0x36:
 						IO_RW(SEND_FKEYS)=0x00400;
@@ -894,6 +926,21 @@ void process_menu(uint32_t mask) {
 				menu_on=0;
 				IO_RW(IO_MENU_ON)=menu_on;
 			break;
+			case 8:		//tape options fkey presses				
+				switch ((menuType[currmenu] [cursorpos]) & 0xff) {
+					case 0x42:
+						IO_RW(SEND_FKEYS)=0x00001;
+					break;
+					case 0x43:
+						IO_RW(SEND_FKEYS)=0x00002;
+					break;
+					case 0x44:
+						IO_RW(SEND_FKEYS)=0x00004;
+					break;					
+				}
+				menu_on=0;
+				IO_RW(IO_MENU_ON)=menu_on;
+			break;
 		}
 		encode_status();
 		
@@ -926,13 +973,6 @@ void process_menu(uint32_t mask) {
 
 
 
-void clearKeyboardMatrix() {
-	for (int r=0;r<8;r++) {			//reset keyboard rows
-		kb_matrix[r]=0xff;			
-	}
-	//if (cap_shift) kb_matrix[0]=0xfe;	//shift							
-	//if (sym_shift) kb_matrix[7]=0xfd;	//shift							
-}
 
 
 
@@ -1305,8 +1345,8 @@ void processInput()
 		row 7 - SPACE SYM M N B
 		*/
 		
-		if (kb_press) setKeyboardMatrix(kbx,kby);
-		if (mod_press) setKeyboardModifier(kbx,kby);
+		//if (kb_press) setKeyboardMatrix(kbx,kby);
+		//if (mod_press) setKeyboardModifier(kbx,kby);
 		if (key_auto) {
 			if (auto_delay) {
 				auto_delay--;
@@ -1322,6 +1362,10 @@ void processInput()
 					IO_RW(IO_KB_ON)=kb_on;
 				}
 			}
+		}
+		else {
+			if (kb_press) setKeyboardMatrix(kbx,kby);
+			if (mod_press) setKeyboardModifier(kbx,kby);
 		}
 
 		IO_RW(IO_KEYB_0)=kb_matrix[0];
@@ -1580,6 +1624,23 @@ void mountVHD() {
 }
 
 
+void set_initial_keyval (unsigned int id, unsigned int addr,unsigned int x,unsigned int y,unsigned int w) {
+	keyjoy_xloc[id]=x;
+	keyjoy_yloc[id]=y;
+	keyjoy_locw[id]=w;	
+	clearKeyboardMatrix();
+	setKeyboardMatrix(x,y);
+	IO_RW(addr)=kb_matrix[0];
+	IO_RW(addr+4)=kb_matrix[1];
+	IO_RW(addr+8)=kb_matrix[2];
+	IO_RW(addr+12)=kb_matrix[3];
+	IO_RW(addr+16)=kb_matrix[4];
+	IO_RW(addr+20)=kb_matrix[5];
+	IO_RW(addr+24)=kb_matrix[6];
+	IO_RW(addr+28)=kb_matrix[7];
+}
+
+
 //Note - external IO is 32 bit
 int main(void)
 {
@@ -1629,146 +1690,17 @@ int main(void)
 		row 7 - SPACE SYM M N B		7FFE
 		*/
 	
-	keyjoy_xloc[0]=4;		// UP = Q
-	keyjoy_yloc[0]=1;
-	keyjoy_locw[0]=1;	
-	keyjoy_xloc[1]=3;		// DOWN = A
-	keyjoy_yloc[1]=2;
-	keyjoy_locw[1]=1;	
-	keyjoy_xloc[2]=12;		// LEFT = O
-	keyjoy_yloc[2]=1;
-	keyjoy_locw[2]=1;	
-	keyjoy_xloc[3]=13;		// RIGHT = P
-	keyjoy_yloc[3]=1;
-	keyjoy_locw[3]=1;	
-	keyjoy_xloc[4]=5;		// A = SPACE
-	keyjoy_yloc[4]=4;
-	keyjoy_locw[4]=5;	
-	keyjoy_xloc[5]=13;		// B = ENTER
-	keyjoy_yloc[5]=2;
-	keyjoy_locw[5]=2;	
-	keyjoy_xloc[6]=11;		// X = 0
-	keyjoy_yloc[6]=0;
-	keyjoy_locw[6]=1;	
-	keyjoy_xloc[7]=0;		// Y = Sym Shift
-	keyjoy_yloc[7]=4;
-	keyjoy_locw[7]=1;	
-	keyjoy_xloc[8]=0;		// L = CShift
-	keyjoy_yloc[8]=3;
-	keyjoy_locw[8]=2;	
-	keyjoy_xloc[9]=11;		// R = I
-	keyjoy_yloc[9]=1;
-	keyjoy_locw[9]=1;
-
-	clearKeyboardMatrix();
-	setKeyboardMatrix(4,1);	// Q (UP)
-	IO_RW(IO_JOYK_0_0)=kb_matrix[0];
-	IO_RW(IO_JOYK_0_1)=kb_matrix[1];
-	IO_RW(IO_JOYK_0_2)=kb_matrix[2];
-	IO_RW(IO_JOYK_0_3)=kb_matrix[3];
-	IO_RW(IO_JOYK_0_4)=kb_matrix[4];
-	IO_RW(IO_JOYK_0_5)=kb_matrix[5];
-	IO_RW(IO_JOYK_0_6)=kb_matrix[6];
-	IO_RW(IO_JOYK_0_7)=kb_matrix[7];
-	
-	clearKeyboardMatrix();
-	setKeyboardMatrix(3,2);	// A (DOWN)
-	IO_RW(IO_JOYK_1_0)=kb_matrix[0];
-	IO_RW(IO_JOYK_1_1)=kb_matrix[1];
-	IO_RW(IO_JOYK_1_2)=kb_matrix[2];
-	IO_RW(IO_JOYK_1_3)=kb_matrix[3];
-	IO_RW(IO_JOYK_1_4)=kb_matrix[4];
-	IO_RW(IO_JOYK_1_5)=kb_matrix[5];
-	IO_RW(IO_JOYK_1_6)=kb_matrix[6];
-	IO_RW(IO_JOYK_1_7)=kb_matrix[7];
-	
-	clearKeyboardMatrix();
-	setKeyboardMatrix(12,1);	// O (LEFT)
-	IO_RW(IO_JOYK_2_0)=kb_matrix[0];
-	IO_RW(IO_JOYK_2_1)=kb_matrix[1];
-	IO_RW(IO_JOYK_2_2)=kb_matrix[2];
-	IO_RW(IO_JOYK_2_3)=kb_matrix[3];
-	IO_RW(IO_JOYK_2_4)=kb_matrix[4];
-	IO_RW(IO_JOYK_2_5)=kb_matrix[5];
-	IO_RW(IO_JOYK_2_6)=kb_matrix[6];
-	IO_RW(IO_JOYK_2_7)=kb_matrix[7];
-	
-	clearKeyboardMatrix();
-	setKeyboardMatrix(13,1);	// P (RIGHT)
-	IO_RW(IO_JOYK_3_0)=kb_matrix[0];
-	IO_RW(IO_JOYK_3_1)=kb_matrix[1];
-	IO_RW(IO_JOYK_3_2)=kb_matrix[2];
-	IO_RW(IO_JOYK_3_3)=kb_matrix[3];
-	IO_RW(IO_JOYK_3_4)=kb_matrix[4];
-	IO_RW(IO_JOYK_3_5)=kb_matrix[5];
-	IO_RW(IO_JOYK_3_6)=kb_matrix[6];
-	IO_RW(IO_JOYK_3_7)=kb_matrix[7];
-	
-	clearKeyboardMatrix();
-	setKeyboardMatrix(5,4);	// SPACE (A)
-	IO_RW(IO_JOYK_4_0)=kb_matrix[0];
-	IO_RW(IO_JOYK_4_1)=kb_matrix[1];
-	IO_RW(IO_JOYK_4_2)=kb_matrix[2];
-	IO_RW(IO_JOYK_4_3)=kb_matrix[3];
-	IO_RW(IO_JOYK_4_4)=kb_matrix[4];
-	IO_RW(IO_JOYK_4_5)=kb_matrix[5];
-	IO_RW(IO_JOYK_4_6)=kb_matrix[6];
-	IO_RW(IO_JOYK_4_7)=kb_matrix[7];
-	
-	clearKeyboardMatrix();
-	setKeyboardMatrix(13,2);	// ENTER (B)
-	IO_RW(IO_JOYK_5_0)=kb_matrix[0];
-	IO_RW(IO_JOYK_5_1)=kb_matrix[1];
-	IO_RW(IO_JOYK_5_2)=kb_matrix[2];
-	IO_RW(IO_JOYK_5_3)=kb_matrix[3];
-	IO_RW(IO_JOYK_5_4)=kb_matrix[4];
-	IO_RW(IO_JOYK_5_5)=kb_matrix[5];
-	IO_RW(IO_JOYK_5_6)=kb_matrix[6];
-	IO_RW(IO_JOYK_5_7)=kb_matrix[7];
-	
-	clearKeyboardMatrix();
-	setKeyboardMatrix(11,0);	// 0 (X)
-	IO_RW(IO_JOYK_6_0)=kb_matrix[0];
-	IO_RW(IO_JOYK_6_1)=kb_matrix[1];
-	IO_RW(IO_JOYK_6_2)=kb_matrix[2];
-	IO_RW(IO_JOYK_6_3)=kb_matrix[3];
-	IO_RW(IO_JOYK_6_4)=kb_matrix[4];
-	IO_RW(IO_JOYK_6_5)=kb_matrix[5];
-	IO_RW(IO_JOYK_6_6)=kb_matrix[6];
-	IO_RW(IO_JOYK_6_7)=kb_matrix[7];
-	
-	clearKeyboardMatrix();
-	setKeyboardMatrix(0,4);	// Sym Shift (Y)
-	IO_RW(IO_JOYK_7_0)=kb_matrix[0];
-	IO_RW(IO_JOYK_7_1)=kb_matrix[1];
-	IO_RW(IO_JOYK_7_2)=kb_matrix[2];
-	IO_RW(IO_JOYK_7_3)=kb_matrix[3];
-	IO_RW(IO_JOYK_7_4)=kb_matrix[4];
-	IO_RW(IO_JOYK_7_5)=kb_matrix[5];
-	IO_RW(IO_JOYK_7_6)=kb_matrix[6];
-	IO_RW(IO_JOYK_7_7)=kb_matrix[7];
-	
-	clearKeyboardMatrix();
-	setKeyboardMatrix(0,3);	// Cap Shift (L)
-	IO_RW(IO_JOYK_8_0)=kb_matrix[0];
-	IO_RW(IO_JOYK_8_1)=kb_matrix[1];
-	IO_RW(IO_JOYK_8_2)=kb_matrix[2];
-	IO_RW(IO_JOYK_8_3)=kb_matrix[3];
-	IO_RW(IO_JOYK_8_4)=kb_matrix[4];
-	IO_RW(IO_JOYK_8_5)=kb_matrix[5];
-	IO_RW(IO_JOYK_8_6)=kb_matrix[6];
-	IO_RW(IO_JOYK_8_7)=kb_matrix[7];
-	
-	clearKeyboardMatrix();
-	setKeyboardMatrix(11,1);	// I (R)
-	IO_RW(IO_JOYK_9_0)=kb_matrix[0];
-	IO_RW(IO_JOYK_9_1)=kb_matrix[1];
-	IO_RW(IO_JOYK_9_2)=kb_matrix[2];
-	IO_RW(IO_JOYK_9_3)=kb_matrix[3];
-	IO_RW(IO_JOYK_9_4)=kb_matrix[4];
-	IO_RW(IO_JOYK_9_5)=kb_matrix[5];
-	IO_RW(IO_JOYK_9_6)=kb_matrix[6];
-	IO_RW(IO_JOYK_9_7)=kb_matrix[7];
+	set_initial_keyval(0,IO_JOYK_0_0,4,1,1);	// Q (UP)
+	set_initial_keyval(1,IO_JOYK_1_0,3,2,1);	// A (DOWN)
+	set_initial_keyval(2,IO_JOYK_2_0,12,1,1);	// O (LEFT)
+	set_initial_keyval(3,IO_JOYK_3_0,13,1,1);	// P (RIGHT)
+	set_initial_keyval(4,IO_JOYK_4_0,5,4,5);	// SPACE (A)
+	set_initial_keyval(5,IO_JOYK_5_0,13,2,2);	// ENTER (B)
+	set_initial_keyval(6,IO_JOYK_6_0,11,0,1);	// 0 (X)
+	set_initial_keyval(7,IO_JOYK_7_0,0,4,1);	// Sym Shift (Y)
+	set_initial_keyval(8,IO_JOYK_8_0,0,3,2);	// Cap Shift (L)
+	set_initial_keyval(9,IO_JOYK_9_0,11,1,1);	// I (R)
+		
 	
 	
 	kb_on=0;

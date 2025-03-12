@@ -96,7 +96,7 @@ const char * gs[] ={
 
 void mapJoystick();
 
-#define MAXMENU 5
+#define MAXMENU 6
 #define MAXMENUITEM 14
 #define MAXMENUITEMLEN 32
 
