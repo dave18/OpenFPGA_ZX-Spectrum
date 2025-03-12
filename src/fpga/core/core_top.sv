@@ -390,7 +390,7 @@ end
 wire [4:0] turbo_req;
 always_comb begin
 	casex({tape_active & ~status[6], status[24:22]})
-		 'b1XXX: turbo_req = 5'b01111;
+		 'b1XXX: turbo_req = 5'b00001;
 		 'b0001: turbo_req = 5'b01111;
 		 'b0010: turbo_req = 5'b00111;
 		 'b0011: turbo_req = 5'b00011;
@@ -430,10 +430,10 @@ always @(posedge clk_sys) begin
 			turbo   <= turbo_req;
 		end else if(!cpu_en & !timeout & ram_ready) begin
 			cpu_en  <= ~pause;
-		end else if(!turbo[4:3] & !ram_ready) begin // SDRAM wait for 28MHz/56MHz turbo
+		end else if(!turbo[4:2] & !ram_ready) begin // SDRAM wait for 28MHz/56MHz turbo
 			cpu_en  <= 0;
-		//end else if(!turbo[4:3] & !ram_ready & tape_active) begin // SDRAM wait for TAPE load on 14MHz
-			//cpu_en  <= 0;
+		end else if(!turbo[4:3] & !ram_ready & tape_active) begin // SDRAM wait for TAPE load on 14MHz
+			cpu_en  <= 0;
 		end else if(cpu_en & pause) begin
 			cpu_en  <= 0;
 		end
@@ -553,7 +553,7 @@ reg   [7:0] ram_din;
 reg         ram_we;
 reg         ram_rd;
 wire  [7:0] ram_dout;
-//wire        ram_ready;
+wire        ram_ready;
 
 reg [24:0] load_addr;
 //always @(posedge clk_sys) load_addr <= ioctl_addr + (ioctl_index[4:0] ? 25'h400000 : ioctl_index[7:6] ? 25'h14C000 : 25'h150000);
@@ -633,7 +633,7 @@ always_comb begin
 		'b0_000: ram_we = (mmc_ram_en | page_special | addr[15] | addr[14] | ((plusd_mem | mf128_mem) & addr[13])) & ~nMREQ & ~nWR;				
 	endcase
 end
-/*
+
 wire dram_cs;
 sdram ram
 (
@@ -661,55 +661,7 @@ sdram ram
 	.we(ram_we),
 	.rd(ram_rd),
 	.ready(ram_ready)
-);*/
-
-wire ram_ready=((sdram_available) || (sdram_ready));
-wire sdram_ready;
-wire sdram_available;
-/*reg ram_ready=0;
-
-always @(posedge clk_sys) begin
-	if ((sdram_available) || (sdram_ready)) ram_ready<=1;
-	else if (!sdram_available) ram_ready<=0;
-end*/
-
-sdram #(
-	.CLOCK_SPEED_MHZ(112),
-	.BURST_LENGTH(1),
-	.WRITE_BURST(0),
-	.CAS_LATENCY(3)	
-) sdram
-(
-      .reset(~pll_core_locked),
-      .clk(clk_sys),
-		// .init_complete(),
-
-      .p0_addr(ram_addr),
-      .p0_data(ram_din),
-		.p0_byte_en(2'b11),
-		.p0_q(ram_dout),
-      .p0_wr_req(ram_we),
-		.p0_rd_req(ram_rd),
-//      .we_req(rom_wr),
-      // .we_ack(sd_wrack),		
-		.p0_ready(sdram_ready),
-		.p0_available(sdram_available),
-		//.p0_available(ram_ready),
-
-      
-      // Actual SDRAM interface
-      .SDRAM_DQ(dram_dq),
-      .SDRAM_A(dram_a),
-      .SDRAM_DQM(dram_dqm),      
-      .SDRAM_BA(dram_ba),
-      //   .SDRAM_nCS(),
-      .SDRAM_nWE(dram_we_n),
-      .SDRAM_nRAS(dram_ras_n),
-      .SDRAM_nCAS(dram_cas_n),
-      .SDRAM_CLK(dram_clk),
-      .SDRAM_CKE(dram_cke)
-  );
-
+);
 
 wire vram_we = (ram_addr[24:16] == 1) & ram_addr[14];
 dpram #(.ADDRWIDTH(15)) vram
@@ -1976,7 +1928,7 @@ mouse mouse( .*, .reset(cold_reset), .addr(addr[10:8]), .sel(), .dout(mouse_data
 wire       kemp_sel = addr[5:0] == 6'h1F;
 //reg  [7:0] kemp_dout;
 
-wire [7:0] kemp_dout =  {2'b00, joyk};
+wire [7:0] kemp_dout =  vkb_state?8'h00:{2'b00, joyk}; //disable kempton input when virtual keyboard is active
 
 /*reg        kemp_mode = 0;
 always @(posedge clk_sys) begin
@@ -2492,7 +2444,7 @@ always @(posedge clk_sys) begin
 end
 
 //wire tape_aud    = ~status[1] & (tape_act ? ~tape_vin : tape_adc_act & ~tape_adc);
-wire tape_aud    = tape_act ? ~tape_vin : 1'b0;
+wire tape_aud    = ~status[1] & (tape_act ? ~tape_vin : 1'b0);
 wire ula_tape_in = tape_act ? ~tape_vin : 1'b0;
 //wire ula_tape_in = tape_act ? ~tape_vin : tape_adc_act ? ~tape_adc : (ear_out | (~status[7] & mic_out));
 /*
