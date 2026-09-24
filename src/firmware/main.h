@@ -100,7 +100,7 @@ void mapJoystick();
 #define MAXMENUITEM 14
 #define MAXMENUITEMLEN 32
 
-#define MAXLISTIDS 21
+#define MAXLISTIDS 22	//0x15 (21) added for the Player 2 Joystick list
 #define MAXLISTITEMS 6
 #define MAXLISTLEN 20
 

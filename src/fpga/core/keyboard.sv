@@ -20,7 +20,7 @@
 //   specific prior written agreement from the author.
 //
 // * License is granted for non-commercial use only.  A fee may not be charged
-//   for redistributions as source code or in synthesized/hardware form without 
+//   for redistributions as source code or in synthesized/hardware form without
 //   specific prior written agreement from the author.
 //
 // THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
@@ -35,14 +35,33 @@
 // ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 // POSSIBILITY OF SUCH DAMAGE.
 //
+// ----------------------------------------------------------------------------
+// Rewritten 2026 to decode a USB HID report directly to the Spectrum matrix,
+// with no PS/2 intermediate step - the ghosting-emulation matrix[]/key_data
+// logic below is the only part carried over unchanged from the original
+// MiSTer PS/2 version of this file. See "USB HID -> Spectrum matrix decode"
+// below and src/fpga/core/usbkbd/README.md for why and what changed.
+// ----------------------------------------------------------------------------
 
-// PS/2 scancode to Spectrum matrix conversion
 module keyboard
 (
 	input             reset,
 	input             clk_sys,
 
-	input      [10:0] ps2_key,
+	// Currently-held USB HID state, already synchronized into clk_sys as a
+	// continuously-refreshed level snapshot (see core_top.sv) - not PS/2,
+	// not an edge/toggle event stream. hid_mod is the USB HID modifier byte
+	// (bit0=LCtrl,1=LShift,2=LAlt,3=LGUI,4=RCtrl,5=RShift,6=RAlt,7=RGUI);
+	// hid_sc1..hid_sc6 are up to 6 simultaneously-held non-modifier USB HID
+	// usage codes (8'h00 = empty slot).
+	input       [7:0] hid_mod,
+	input       [7:0] hid_sc1,
+	input       [7:0] hid_sc2,
+	input       [7:0] hid_sc3,
+	input       [7:0] hid_sc4,
+	input       [7:0] hid_sc5,
+	input       [7:0] hid_sc6,
+
 	input             recreated_zx,
 	input             ghosting,
 
@@ -54,9 +73,6 @@ module keyboard
 );
 
 reg  [4:0] keys[7:0];
-reg        release_btn = 0;
-reg  [7:0] code;
-reg        extended = 0;
 wire [4:0] matrix[7:0];
 wire [4:0] nghosting = {5{~ghosting}};
 
@@ -154,18 +170,261 @@ assign key_data = (!addr[8]  ? matrix[0] : 5'b11111)
                  &(!addr[14] ? matrix[6] : 5'b11111)
                  &(!addr[15] ? matrix[7] : 5'b11111);
 
-reg  input_strobe = 0;
+// ----------------------------------------------------------------------------
+// USB HID -> Spectrum matrix decode
+//
+// keys[7:0][4:0] is indexed [row][col], active LOW (0 = pressed), same
+// layout the ghosting logic above expects. Matrix positions are numbered
+// 0..39 as row*5+col for the function below; bit 0 is CAPS SHIFT
+// (keys[0][0]) and bit 36 is SYMBOL SHIFT (keys[7][1]).
+//
+// This whole section replaces what used to be an edge-triggered decoder
+// fed one MiSTer-style {toggle,pressed,code} PS/2 event at a time, taken
+// from a "live snapshot" workaround that itself existed only to route
+// around a slot-indexing bug in the vendored PS/2 bridge - see
+// src/fpga/core/usbkbd/README.md's history. Going direct from the HID
+// report removes the PS/2 shape (and that whole class of bug) entirely:
+// there is no per-key state to fall out of sync, because every cycle
+// re-derives the complete matrix from whichever of the up to 6 scancode
+// slots + 8 modifier bits are CURRENTLY reported, with nothing latched in
+// between except the final register keys[][] itself. Two keys changing in
+// the same HID report, or a HID host reordering/compacting its scancode
+// slots, can no longer produce a stuck or dropped key - there's no slot
+// index or toggle bit anywhere in this design for that kind of bug to
+// live in.
+wire lshift = hid_mod[1];
+wire rshift = hid_mod[5];
+wire lctrl  = hid_mod[0];
+wire rctrl  = hid_mod[4];
+wire lalt   = hid_mod[2];
+wire ralt   = hid_mod[6];
+wire shift_live = lshift | rshift;
+wire ctrl_live  = lctrl  | rctrl;
+wire alt_live   = lalt   | ralt;
 
-reg  left_shift = 0;
-wire shift = mod[0] | left_shift;
-reg  right_ctrl = 0;
-wire ctrl = mod[2] | right_ctrl;
+// Per-slot decode: given one currently-active USB HID usage code and the
+// live shift state, return which Spectrum matrix position(s) it asserts,
+// and whether it unconditionally demands CAPS SHIFT (arrows/backspace/
+// caps-lock/escape - Spectrum has no dedicated keys for these, they're
+// CAPS SHIFT + a number-row key) or SYMBOL SHIFT (punctuation that only
+// exists on the Spectrum via SYMBOL SHIFT + another key), same grouping
+// the original PS/2 case statement used, just keyed by USB HID usage ID -
+// composed from the vendored hid2ps2_key.sv ROM's HID->PS/2 table (which
+// physical key each USB code is) and this file's own long-standing PS/2
+// -> Spectrum-matrix mapping (where that key lives on the matrix), with
+// no PS/2 codes actually appearing anywhere below. Return format:
+// [39:0] = one-hot(s) of matrix positions this code asserts,
+// [40]   = force CAPS SHIFT on (and SYMBOL off, unless another active
+//          code's force_symbol also fires - resolved by the caller),
+// [41]   = force SYMBOL SHIFT on (and CAPS off, same caveat).
+// [42]   = additionally assert CAPS SHIFT (Tab/"G mode" only) - ORed on
+//          top of whatever [40]/[41] resolve to, not part of that
+//          priority group (matches the original PS/2 version, where
+//          Tab's own case ran after and independently of the shift-
+//          priority case for the same reason).
+function automatic [42:0] decode_hid(input [7:0] hid, input shift_in);
+	reg [39:0] b;
+	reg        fc, fs, tc;
+	begin
+		b  = 40'h0;
+		fc = 1'b0;
+		fs = 1'b0;
+		tc = 1'b0;
+		case (hid)
+			// letters
+			8'h1D : b[1]  = 1'b1; // Z
+			8'h1B : b[2]  = 1'b1; // X
+			8'h06 : b[3]  = 1'b1; // C
+			8'h19 : b[4]  = 1'b1; // V
+			8'h04 : b[5]  = 1'b1; // A
+			8'h16 : b[6]  = 1'b1; // S
+			8'h07 : b[7]  = 1'b1; // D
+			8'h09 : b[8]  = 1'b1; // F
+			8'h0A : b[9]  = 1'b1; // G
+			8'h14 : b[10] = 1'b1; // Q
+			8'h1A : b[11] = 1'b1; // W
+			8'h08 : b[12] = 1'b1; // E
+			8'h15 : b[13] = 1'b1; // R
+			8'h17 : b[14] = 1'b1; // T
+			8'h13 : b[25] = 1'b1; // P
+			8'h12 : b[26] = 1'b1; // O
+			8'h0C : b[27] = 1'b1; // I
+			8'h18 : b[28] = 1'b1; // U
+			8'h1C : b[29] = 1'b1; // Y
+			8'h0F : b[31] = 1'b1; // L
+			8'h0E : b[32] = 1'b1; // K
+			8'h0D : b[33] = 1'b1; // J
+			8'h0B : b[34] = 1'b1; // H
+			8'h10 : b[37] = 1'b1; // M
+			8'h11 : b[38] = 1'b1; // N
+			8'h05 : b[39] = 1'b1; // B
+
+			// number row
+			8'h1E : b[15] = 1'b1; // 1
+			8'h1F : b[16] = 1'b1; // 2
+			8'h20 : b[17] = 1'b1; // 3
+			8'h21 : b[18] = 1'b1; // 4
+			8'h22 : b[19] = 1'b1; // 5
+			8'h23 : b[24] = 1'b1; // 6
+			8'h24 : b[23] = 1'b1; // 7
+			8'h25 : b[22] = 1'b1; // 8
+			8'h26 : b[21] = 1'b1; // 9
+			8'h27 : b[20] = 1'b1; // 0
+
+			8'h28 : b[30] = 1'b1; // ENTER
+			8'h2C : b[35] = 1'b1; // SPACE
+
+			// Cursor keys, backspace, caps lock, escape - CAPS SHIFT +
+			// number row, force CAPS SHIFT on and SYMBOL SHIFT off.
+			8'h50 : begin b[19] = 1'b1; fc = 1'b1; end // Left  (CAPS 5)
+			8'h51 : begin b[24] = 1'b1; fc = 1'b1; end // Down  (CAPS 6)
+			8'h52 : begin b[23] = 1'b1; fc = 1'b1; end // Up    (CAPS 7)
+			8'h4F : begin b[22] = 1'b1; fc = 1'b1; end // Right (CAPS 8)
+			8'h2A : begin b[20] = 1'b1; fc = 1'b1; end // Backspace (CAPS 0)
+			8'h39 : begin b[16] = 1'b1; fc = 1'b1; end // Caps Lock (CAPS 2)
+			8'h29 : begin b[35] = 1'b1; fc = 1'b1; end // Escape (CAPS SPACE)
+
+			// Punctuation - force SYMBOL SHIFT on and CAPS SHIFT off;
+			// several also pick a different matrix target depending on
+			// the live shift state, matching a real PC keyboard's
+			// unshifted/shifted pair for that key.
+			8'h36 : begin fs = 1'b1; if (shift_in) b[14] = 1'b1; else b[37] = 1'b1; end // , <
+			8'h37 : begin fs = 1'b1; if (shift_in) b[13] = 1'b1; else b[38] = 1'b1; end // . >
+			8'h38 : begin fs = 1'b1; if (shift_in) b[3]  = 1'b1; else b[4]  = 1'b1; end // / ?
+			8'h33 : begin fs = 1'b1; if (shift_in) b[1]  = 1'b1; else b[26] = 1'b1; end // ; :
+			8'h34 : begin fs = 1'b1; if (shift_in) b[25] = 1'b1; else b[23] = 1'b1; end // ' "
+			8'h2F : begin fs = 1'b1; b[22] = 1'b1; end // [ { give (
+			8'h30 : begin fs = 1'b1; b[21] = 1'b1; end // ] } give )
+			8'h2D : begin fs = 1'b1; if (shift_in) b[20] = 1'b1; else b[33] = 1'b1; end // - _
+			8'h2E : begin fs = 1'b1; if (shift_in) b[32] = 1'b1; else b[31] = 1'b1; end // = +
+			8'h35 : begin fs = 1'b1; b[23] = 1'b1; end // ` ~ give '
+			8'h55 : begin fs = 1'b1; b[39] = 1'b1; end // keypad * give *
+			8'h31 : begin fs = 1'b1; b[39] = 1'b1; end // \ | give *
+			8'h32 : begin fs = 1'b1; b[39] = 1'b1; end // Non-US # and ~ give *
+
+			// Tab ("G mode" - EXTEND MODE): asserts CAPS SHIFT and "9"
+			// directly, independent of the CAPS/SYMBOL priority group
+			// above (does not force SYMBOL off).
+			8'h2B : begin tc = 1'b1; b[21] = 1'b1; end
+
+			default: ;
+		endcase
+		decode_hid = {tc, fs, fc, b};
+	end
+endfunction
+
+// F1-F11 don't exist on the Spectrum matrix - PC-keyboard-only, used for
+// the OSD/menu below. No shift-dependence, no CAPS/SYMBOL interaction.
+function automatic [11:1] decode_fn(input [7:0] hid);
+	reg [11:1] f;
+	begin
+		f = 11'h0;
+		case (hid)
+			8'h3A : f[1]  = 1'b1;
+			8'h3B : f[2]  = 1'b1;
+			8'h3C : f[3]  = 1'b1;
+			8'h3D : f[4]  = 1'b1;
+			8'h3E : f[5]  = 1'b1;
+			8'h3F : f[6]  = 1'b1;
+			8'h40 : f[7]  = 1'b1;
+			8'h41 : f[8]  = 1'b1;
+			8'h42 : f[9]  = 1'b1;
+			8'h43 : f[10] = 1'b1;
+			8'h44 : f[11] = 1'b1;
+			default: ;
+		endcase
+		decode_fn = f;
+	end
+endfunction
+
+wire [42:0] d1 = decode_hid(hid_sc1, shift_live);
+wire [42:0] d2 = decode_hid(hid_sc2, shift_live);
+wire [42:0] d3 = decode_hid(hid_sc3, shift_live);
+wire [42:0] d4 = decode_hid(hid_sc4, shift_live);
+wire [42:0] d5 = decode_hid(hid_sc5, shift_live);
+wire [42:0] d6 = decode_hid(hid_sc6, shift_live);
+
+wire [39:0] live_bits_raw = d1[39:0] | d2[39:0] | d3[39:0] | d4[39:0] | d5[39:0] | d6[39:0];
+wire        any_force_caps   = d1[40] | d2[40] | d3[40] | d4[40] | d5[40] | d6[40];
+wire        any_force_symbol = d1[41] | d2[41] | d3[41] | d4[41] | d5[41] | d6[41];
+wire        any_tab_caps     = d1[42] | d2[42] | d3[42] | d4[42] | d5[42] | d6[42];
+
+// CAPS/SYMBOL SHIFT baseline continuously follows the physical shift/ctrl
+// keys; a currently-active special key (the force_caps/force_symbol
+// groups above) overrides that baseline. Both groups being active at
+// once (e.g. holding an arrow key while also pressing a punctuation key)
+// is not realistic on a physical keyboard - force_symbol wins in that
+// case, an arbitrary but deterministic and harmless tie-break. Tab's
+// CAPS SHIFT contribution (any_tab_caps) is ORed on afterwards, outside
+// this priority resolution - see decode_hid's [42] comment.
+wire want_caps   = (any_force_symbol ? 1'b0 : (any_force_caps ? 1'b1 : shift_live)) | any_tab_caps;
+wire want_symbol = any_force_symbol ? 1'b1 : (any_force_caps ? 1'b0 : ctrl_live);
+
+wire [39:0] live_bits = (live_bits_raw & ~(40'h1 | (40'h1 << 36)))
+                      | (want_caps   ? 40'h1        : 40'h0)
+                      | (want_symbol ? (40'h1 << 36) : 40'h0);
+
+wire [11:1] live_fn = decode_fn(hid_sc1) | decode_fn(hid_sc2) | decode_fn(hid_sc3)
+                    | decode_fn(hid_sc4) | decode_fn(hid_sc5) | decode_fn(hid_sc6);
+
+// recreated_zx (an alternate, non-QWERTY key mapping) is not currently
+// exposed in the Pocket menu - core_top.sv hardwires it to 0 - and its
+// original PS/2 implementation was asymmetric make/break (pressing one
+// PC key set a target bit low, a DIFFERENT PC key set the same bit high),
+// which has no natural equivalent in this continuous, level-based decode.
+// Left disconnected here rather than guessing at a redesign for a mode
+// nothing can currently reach; re-derive from the PS/2-based history in
+// git if this ever needs to be exposed.
+
+// --------------------------------------------------------------------
+// "LOAD ""` + ENTER" auto-type macro, triggered by a fresh F10 press.
+// Steps through matrix positions on a timer, completely overriding the
+// live HID decode while running (matching the original PS/2 version's
+// behaviour) - 8'hFF marks "not running"/terminator, 8'hFE marks a gap
+// (nothing pressed this step), 0-39 is a direct matrix position index.
+// The original PS/2 version's first three running steps defensively
+// released Shift/Alt/Ctrl before typing, in case the OSD key combo used
+// to reach F10 left one of them latched; that's not a concern here since
+// the macro fully overrides live decode rather than incrementally
+// patching persistent state, so those steps are now plain gaps.
+reg [7:0] auto_seq[46] = '{
+	8'hFF,
+	8'hFE,8'hFE,8'hFE,8'hFE,8'hFE,8'hFE,8'hFE,8'hFE,
+	8'hFE,8'hFE,8'hFE,8'hFE,8'hFE,8'hFE,8'hFE,8'hFE,
+	8'hFE,8'hFE,8'hFE,8'hFE,8'hFE,8'hFE,8'hFE,8'hFE,
+	8'hFE,8'hFE,8'hFE,8'hFE,8'hFE,8'hFE,8'hFE,8'hFE,
+	8'hFE, // was: release right shift
+	8'hFE, // was: release alt
+	8'hFE, // was: release ctrl
+	33,    // press J
+	8'hFE, // release J
+	23,    // press '
+	8'hFE, // release '
+	8'hFE, // gap
+	23,    // press '
+	8'hFE, // release '
+	30,    // press ENTER
+	8'hFE, // release ENTER
+	8'hFF  // terminator
+};
+
+reg [5:0] auto_pos = 0;
+reg       old_fn10 = 0;
+
+wire        auto_running = (auto_seq[auto_pos] != 8'hFF);
+wire [39:0] auto_bits     = (auto_seq[auto_pos] < 40) ? (40'h1 << auto_seq[auto_pos]) : 40'h0;
 
 always @(posedge clk_sys) begin
 	reg old_reset = 0;
-	old_reset <= reset;
+	integer div;
 
-	if(~old_reset & reset)begin
+	old_reset <= reset;
+	old_fn10  <= Fn[10];
+
+	Fn  <= live_fn; // F1..F11, level state
+	mod <= {lctrl, alt_live, rshift}; // mod[2]=lctrl mod[1]=alt mod[0]=rshift
+
+	if (~old_reset & reset) begin
 		keys[0] <= 5'b11111;
 		keys[1] <= 5'b11111;
 		keys[2] <= 5'b11111;
@@ -174,344 +433,36 @@ always @(posedge clk_sys) begin
 		keys[5] <= 5'b11111;
 		keys[6] <= 5'b11111;
 		keys[7] <= 5'b11111;
-		left_shift <= 0;
-		right_ctrl <= 0;
-	end
-
-	if(input_strobe) begin
-		case(code)
-			8'h59: mod[0]<= ~release_btn; // right shift
-			8'h12: left_shift <= ~release_btn;
-			8'h11: mod[1]<= ~release_btn; // alt
-			8'h14: begin
-					if (~extended) begin
-						mod[2]<= ~release_btn; // left_ctrl
-					end else begin
-						right_ctrl <= ~release_btn;
-					end
-				end
-			8'h05: Fn[1] <= ~release_btn; // F1
-			8'h06: Fn[2] <= ~release_btn; // F2
-			8'h04: Fn[3] <= ~release_btn; // F3
-			8'h0C: Fn[4] <= ~release_btn; // F4
-			8'h03: Fn[5] <= ~release_btn; // F5
-			8'h0B: Fn[6] <= ~release_btn; // F6
-			8'h83: Fn[7] <= ~release_btn; // F7
-			8'h0A: Fn[8] <= ~release_btn; // F8
-			8'h01: Fn[9] <= ~release_btn; // F9
-			8'h09: Fn[10]<= ~release_btn; // F10
-			8'h78: Fn[11]<= ~release_btn; // F11
-		endcase
-
-		if (~recreated_zx) begin
-			// update CAPS SHIFT and SYMBOL SHIFT
-			if (~release_btn) begin // key down
-				case(code)
-					// special keys sent to the ULA as key combinations
-
-					// keys that add CAPS SHIFT, and remove SYMBOL SHIFT
-					8'h6B, // Left (CAPS 5)
-					8'h72, // Down (CAPS 6)
-					8'h75, // Up (CAPS 7)
-					8'h74, // Right (CAPS 8)
-					8'h66, // Backspace (CAPS 0)
-					8'h58, // Caps lock (CAPS 2)
-					8'h76 : begin // Escape (CAPS SPACE)
-							keys[0][0] <= 0; // CAPS SHIFT on
-							keys[7][1] <= 1; // SYMBOL SHIFT off
-						end
-
-					// keys that add SYMBOL SHIFT and remove CAPS SHIFT
-					// , < . > / ? ; : ' " [ { ] } - _ = + ` ~ *
-					8'h49, 8'h41, 8'h4A, 8'h4C, 8'h52, 8'h54, 8'h5b, 8'h4E, 8'h55, 8'h0E, 8'h7C, 8'h5D : begin 
-							keys[7][1] <= 0; // SYMBOL SHIFT on
-							keys[0][0] <= 1; // CAPS SHIFT off
-						end
-
-					8'h59, 8'h12: begin
-							keys[0][0] <= 0; // CAPS SHIFT on
-							keys[7][1] <= ~ctrl; // SYMBOL SHIFT
-						end
-					8'h14: begin
-							keys[7][1] <= 0;  // SYMBOL SHIFT on
-							keys[0][0] <= ~shift; // CAPS SHIFT
-						end
-
-					default: begin
-							keys[0][0] <= ~shift; // CAPS SHIFT
-							keys[7][1] <= ~ctrl;  // SYMBOL SHIFT
-						end
-				endcase
-			end else begin // (release_btn) - key up
-				case(code)
-					// only sets CAPS SHIFT and SYMBOL SHIFT on shift or ctrl release
-					// fixes fast alternating between left cursor and right cursor giving 5s and 8s
-					8'h12: begin // left shift
-							keys[0][0] <= ~mod[0]; // CAPS SHIFT
-						end
-					8'h59: begin // right shift
-							keys[0][0] <= ~left_shift; // CAPS SHIFT
-						end
-					8'h14: begin
-							if (~extended) begin // left ctrl
-								keys[7][1] <= ~right_ctrl; // SYMBOL SHIFT
-							end else begin // right ctrl
-								keys[7][1] <= ~mod[2]; // SYMBOL SHIFT
-							end
-						end
-					default: ;
-				endcase
-			end
-
-			case(code)
-				// keys[0][0] CAPS SHIFT is set above
-				8'h1a : keys[0][1] <= release_btn; // Z
-				8'h22 : keys[0][2] <= release_btn; // X
-				8'h21 : keys[0][3] <= release_btn; // C
-				8'h2a : keys[0][4] <= release_btn; // V
-
-				8'h1c : keys[1][0] <= release_btn; // A
-				8'h1b : keys[1][1] <= release_btn; // S
-				8'h23 : keys[1][2] <= release_btn; // D
-				8'h2b : keys[1][3] <= release_btn; // F
-				8'h34 : keys[1][4] <= release_btn; // G
-
-				8'h15 : keys[2][0] <= release_btn; // Q
-				8'h1d : keys[2][1] <= release_btn; // W
-				8'h24 : keys[2][2] <= release_btn; // E
-				8'h2d : keys[2][3] <= release_btn; // R
-				8'h2c : keys[2][4] <= release_btn; // T
-
-				8'h16 : keys[3][0] <= release_btn; // 1
-				8'h1e : keys[3][1] <= release_btn; // 2
-				8'h26 : keys[3][2] <= release_btn; // 3
-				8'h25 : keys[3][3] <= release_btn; // 4
-				8'h2e : keys[3][4] <= release_btn; // 5
-
-				8'h45 : keys[4][0] <= release_btn; // 0
-				8'h46 : keys[4][1] <= release_btn; // 9
-				8'h3e : keys[4][2] <= release_btn; // 8
-				8'h3d : keys[4][3] <= release_btn; // 7
-				8'h36 : keys[4][4] <= release_btn; // 6
-
-				8'h4d : keys[5][0] <= release_btn; // P
-				8'h44 : keys[5][1] <= release_btn; // O
-				8'h43 : keys[5][2] <= release_btn; // I
-				8'h3c : keys[5][3] <= release_btn; // U
-				8'h35 : keys[5][4] <= release_btn; // Y
-
-				8'h5a : keys[6][0] <= release_btn; // ENTER
-				8'h4b : keys[6][1] <= release_btn; // L
-				8'h42 : keys[6][2] <= release_btn; // K
-				8'h3b : keys[6][3] <= release_btn; // J
-				8'h33 : keys[6][4] <= release_btn; // H
-
-				8'h29 : keys[7][0] <= release_btn; // SPACE
-				// keys[7][1] SYMBOL SHIFT is set above
-				8'h3a : keys[7][2] <= release_btn; // M
-				8'h31 : keys[7][3] <= release_btn; // N
-				8'h32 : keys[7][4] <= release_btn; // B
-
-				// Cursor keys - these are actually extended (E0 xx), but
-				// the scancodes for the numeric keypad cursor keys are
-				// are the same but without the extension, so we'll accept
-				// the codes whether they are extended or not
-				8'h6B : keys[3][4] <= release_btn; // Left (CAPS 5)
-				8'h72 : keys[4][4] <= release_btn; // Down (CAPS 6)
-				8'h75 : keys[4][3] <= release_btn; // Up (CAPS 7)
-				8'h74 : keys[4][2] <= release_btn; // Right (CAPS 8)
-
-				// Other special keys sent to the ULA as key combinations
-				8'h66 : keys[4][0] <= release_btn; // Backspace (CAPS 0)
-				8'h58 : keys[3][1] <= release_btn; // Caps lock (CAPS 2)
-				8'h76 : keys[7][0] <= release_btn; // Escape (CAPS SPACE)
-
-				8'h49 : begin // , <
-						keys[2][4] <= release_btn | ~shift; // <
-						keys[7][2] <= release_btn |  shift; // ,
-					end
-				8'h41 : begin // . >
-						keys[2][3] <= release_btn | ~shift; // >
-						keys[7][3] <= release_btn |  shift; // .
-					end
-				8'h4A : begin // / ? and numeric /
-						keys[0][3] <= release_btn | ~shift; // ?
-						keys[0][4] <= release_btn |  shift; // /
-					end
-				8'h4C : begin // ; :
-						keys[0][1] <= release_btn | ~shift; // :
-						keys[5][1] <= release_btn |  shift; // ;
-					end
-				8'h52 : begin // ' "	// note:  ' and " intentionally swapped
-						keys[5][0] <= release_btn |  shift; // "
-						keys[4][3] <= release_btn | ~shift; // '
-					end
-				8'h54 : keys[4][2] <= release_btn; // [ { give (
-				8'h5B : keys[4][1] <= release_btn; // ] } give )
-				8'h4E : begin // - _
-						keys[4][0] <= release_btn | ~shift; // _
-						keys[6][3] <= release_btn |  shift; // -
-					end
-				8'h55 : begin // = +
-						keys[6][2] <= release_btn | ~shift; // +
-						keys[6][1] <= release_btn |  shift; // =
-					end
-				8'h0E : keys[4][3] <= release_btn; // ` ~ give `
-				8'h7C : keys[7][4] <= release_btn; // numeric *
-				8'h5D : keys[7][4] <= release_btn; // \ | give *
-				8'h0D : begin // G mode
-						keys[0][0] <= release_btn;
-						keys[4][1] <= release_btn;
-					end
-				default: ;
-			endcase
-		end else begin // recreated_zx
-			if (~left_shift) begin
-				// unshifted codes
-				case(code)
-					8'h1C : keys[3][0] <= 0; // a -> 1 make
-					8'h32 : keys[3][0] <= 1; // b -> 1 break
-					8'h21 : keys[3][1] <= 0; // c -> 2 make
-					8'h23 : keys[3][1] <= 1; // d -> 2 break
-					8'h24 : keys[3][2] <= 0; // e -> 3 make
-					8'h2B : keys[3][2] <= 1; // f -> 3 break
-					8'h34 : keys[3][3] <= 0; // g -> 4 make
-					8'h33 : keys[3][3] <= 1; // h -> 4 break
-					8'h43 : keys[3][4] <= 0; // i -> 5 make
-					8'h3B : keys[3][4] <= 1; // j -> 5 break
-					8'h42 : keys[4][4] <= 0; // k -> 6 make
-					8'h4B : keys[4][4] <= 1; // l -> 6 break
-					8'h3A : keys[4][3] <= 0; // m -> 7 make
-					8'h31 : keys[4][3] <= 1; // n -> 7 break
-					8'h44 : keys[4][2] <= 0; // o -> 8 make
-					8'h4D : keys[4][2] <= 1; // p -> 8 break
-					8'h15 : keys[4][1] <= 0; // q -> 9 make
-					8'h2D : keys[4][1] <= 1; // r -> 9 break
-					8'h1B : keys[4][0] <= 0; // s -> 0 make
-					8'h2C : keys[4][0] <= 1; // t -> 0 break
-					8'h3C : keys[2][0] <= 0; // u -> q make
-					8'h2A : keys[2][0] <= 1; // v -> q break
-					8'h1D : keys[2][1] <= 0; // w -> w make
-					8'h22 : keys[2][1] <= 1; // x -> w break
-					8'h35 : keys[2][2] <= 0; // y -> e make
-					8'h1A : keys[2][2] <= 1; // z -> e break
-					8'h45 :	keys[6][3] <= 0; // 0 -> j make
-					8'h16 :	keys[6][3] <= 1; // 1 -> j break
-					8'h1E :	keys[6][2] <= 0; // 2 -> k make
-					8'h26 : keys[6][2] <= 1; // 3 -> k break
-					8'h25 : keys[6][1] <= 0; // 4 -> l make
-					8'h2E : keys[6][1] <= 1; // 5 -> l break
-					8'h36 : keys[6][0] <= 0; // 6 -> ENTER make
-					8'h3D : keys[6][0] <= 1; // 7 -> ENTER break
-					8'h3E : keys[0][0] <= 0; // 8 -> CAPS make
-					8'h46 : keys[0][0] <= 1; // 9 -> CAPS break
-					8'h4E : keys[0][2] <= 0; // - -> x make
-					8'h55 : keys[0][2] <= 1; // = -> x break
-					8'h54 : keys[0][3] <= 0; // [ -> c make
-					8'h5B : keys[0][3] <= 1; // ] -> c break
-					8'h4C : keys[0][4] <= 0; // ; -> v make (break is shifted)
-					8'h41 : keys[7][4] <= 0; // , -> b make
-					8'h49 : keys[7][4] <= 1; // . -> b break
-					8'h4A : keys[7][3] <= 0; // / -> n make (break is shifted)
-				endcase
-			end else begin // left shift
-				// shifted codes
-				case(code)
-					8'h1C : keys[2][3] <= 0; // A -> r make
-					8'h32 : keys[2][3] <= 1; // B -> r break
-					8'h21 : keys[2][4] <= 0; // C -> t make
-					8'h23 : keys[2][4] <= 1; // D -> t break
-					8'h24 : keys[5][4] <= 0; // E -> y make
-					8'h2B : keys[5][4] <= 1; // F -> y break
-					8'h34 : keys[5][3] <= 0; // G -> u make
-					8'h33 : keys[5][3] <= 1; // H -> u break
-					8'h43 : keys[5][2] <= 0; // I -> i make
-					8'h3B : keys[5][2] <= 1; // J -> i break
-					8'h42 : keys[5][1] <= 0; // K -> o make
-					8'h4B : keys[5][1] <= 1; // L -> o break
-					8'h3A : keys[5][0] <= 0; // M -> p make
-					8'h31 : keys[5][0] <= 1; // N -> p break
-					8'h44 : keys[1][0] <= 0; // O -> a make
-					8'h4D : keys[1][0] <= 1; // P -> a break
-					8'h15 : keys[1][1] <= 0; // Q -> s make
-					8'h2D : keys[1][1] <= 1; // R -> s break
-					8'h1B : keys[1][2] <= 0; // S -> d make
-					8'h2C : keys[1][2] <= 1; // T -> d break
-					8'h3C : keys[1][3] <= 0; // U -> f make
-					8'h2A : keys[1][3] <= 1; // V -> f break
-					8'h1D : keys[1][4] <= 0; // W -> g make
-					8'h22 : keys[1][4] <= 1; // X -> g break
-					8'h35 : keys[6][4] <= 0; // Y -> h make
-					8'h1A : keys[6][4] <= 1; // Z -> h break
-					8'h41 : keys[0][1] <= 0; // < -> z make
-					8'h49 : keys[0][1] <= 1; // > -> z break
-					8'h4C : keys[0][4] <= 1; // : -> v break (make is unshifted)
-					8'h4A : keys[7][3] <= 1; // ? -> n break (make is unshifted)
-					8'h54 : keys[7][2] <= 0; // { -> m make
-					8'h5B : keys[7][2] <= 1; // } -> m break
-					8'h16 :	keys[7][1] <= 0; // ! -> SYMBOL make
-					8'h25 : keys[7][1] <= 1; // $ -> SYMBOL break
-					8'h2E : keys[7][0] <= 0; // % -> SPACE make
-					8'h36 : keys[7][0] <= 1; // ^ -> SPACE break
-				endcase
-			end
-		end
-	end
-end
-
-reg [8:0] auto[46] = '{
-	255,
-
-	0,0,0,0,0,0,0,0,
-	0,0,0,0,0,0,0,0,
-	0,0,0,0,0,0,0,0,
-	0,0,0,0,0,0,0,0,
-
-	{1'b1, 8'h59}, // right shift
-	{1'b1, 8'h11}, // alt
-	{1'b1, 8'h14}, // ctrl
-	{1'b0, 8'h3b}, // J
-	{1'b1, 8'h3b}, // J
-	{1'b0, 8'h52}, // "
-	{1'b1, 8'h52}, // "
-	0,
-	{1'b0, 8'h52}, // "
-	{1'b1, 8'h52}, // "
-	{1'b0, 8'h5a}, // enter
-	{1'b1, 8'h5a}, // enter
-	255
-};
-
-always @(posedge clk_sys) begin
-	integer div;
-	reg [5:0] auto_pos = 0;
-	reg old_reset = 0;
-	reg old_state;
-
-	input_strobe <= 0;
-	old_reset <= reset;
-	old_state <= ps2_key[10];
-
-	if(~old_reset & reset)begin
 		auto_pos <= 0;
 	end else begin
-		if(auto[auto_pos] == 255) begin
-			div <=0;
-			if(old_state != ps2_key[10]) begin
-				release_btn <= ~ps2_key[9];
-				code <= ps2_key[7:0];
-				extended <= ps2_key[8];
-				input_strobe <= 1;
-				if((ps2_key[8:0] == 9) && ~ps2_key[9]) auto_pos <= 1; // F10
-			end
-		end else begin
+		if (~old_fn10 & Fn[10] & ~auto_running) auto_pos <= 1;
+
+		if (auto_running) begin
 			div <= div + 1;
-			if(div == 7000000) begin 
-				div <=0;
-				if(auto[auto_pos]) {input_strobe, release_btn, code} <= {1'b1, auto[auto_pos]};
+			if (div == 7000000) begin
+				div <= 0;
 				auto_pos <= auto_pos + 1'd1;
 			end
+			keys[0] <= ~auto_bits[4:0];
+			keys[1] <= ~auto_bits[9:5];
+			keys[2] <= ~auto_bits[14:10];
+			keys[3] <= ~auto_bits[19:15];
+			keys[4] <= ~auto_bits[24:20];
+			keys[5] <= ~auto_bits[29:25];
+			keys[6] <= ~auto_bits[34:30];
+			keys[7] <= ~auto_bits[39:35];
+		end else if (~recreated_zx) begin
+			div <= 0;
+			keys[0] <= ~live_bits[4:0];
+			keys[1] <= ~live_bits[9:5];
+			keys[2] <= ~live_bits[14:10];
+			keys[3] <= ~live_bits[19:15];
+			keys[4] <= ~live_bits[24:20];
+			keys[5] <= ~live_bits[29:25];
+			keys[6] <= ~live_bits[34:30];
+			keys[7] <= ~live_bits[39:35];
 		end
 	end
 end
+
 endmodule

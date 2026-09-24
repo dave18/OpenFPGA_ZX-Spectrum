@@ -31,25 +31,64 @@ boot.rom is a collection of required ROMs, however it does not contain a full se
 
 ### Pocket specfic features
 
-Virtual keyboard (very basic for now - A press key, X toggle shifts)
+USB keyboard support - plug a USB keyboard into the Analogue Dock and it drives the Spectrum keyboard matrix directly. F1-F11 and Ctrl/Shift/Alt work as documented below.
 
-Key Mapped Joystick (allows Left, Right, Up, Down, A, B, X, Y, L Trig and R Trig to be mapped to keyboard keys).
+USB mouse support - plug a USB mouse into the Analogue Dock for Kempston Mouse emulation. Enable it in the "Mouse:" menu option (Kempston L/R or Kempston R/L to swap the left/right buttons). Driven directly from the Dock's mouse report - see `src/fpga/core/mouse.v`.
+
+Independent Player 1 / Player 2 Joystick type selectors (Start menu) - each of the two attached controllers can be set to Kempston, Sinclair I, Sinclair II or Cursor independently, for genuine 2-player games. The menu won't let both players select the same type at once.
+
+Key Mapped Joystick (P1) (allows Left, Right, Up, Down, A, B, X, Y, L Trig and R Trig on controller 1 to be mapped to keyboard keys) - now a separate on/off toggle rather than one of the Player 1 type choices, so it can be used alongside a Player 1 joystick type if desired.
 
 - Note: if using a different joystick type X, Y, L Trig and R Trig will still function to allow for extra keys to be mapped
 
 Border/Borderless video option
 
-Select brings up virtual keyboard
+**Menu access is controller-only.** The following all read the attached
+gamepad directly and have no USB keyboard equivalent - a docked keyboard
+cannot open, close, or navigate any of them:
 
-Start brings up menu
+- **Select** - this core's own on-screen virtual keyboard overlay (very
+  basic for now - A press key, X toggle shifts)
+- **Start** - this core's own on-screen menu (model select, tape/disk
+  options, etc.)
+- **L Trig & Start** - Pause/Unpause (warning: may crash your game, it
+  just holds CPU clock cycles)
+- **L Trig & Select** - Issue NMI
+- The **controller's Home button**, which opens the *Analogue Pocket's own*
+  system menu - this is where files (`.tap`/`.tzx`/`.dsk`/`.z80`/`.sna`
+  etc.) actually get loaded. This isn't part of the core at all: the
+  Pocket's firmware intercepts the Home button before it ever reaches the
+  FPGA, so there is no signal the core could watch or forward even if it
+  wanted to, and no keyboard shortcut can substitute for it. **Loading a
+  game/tape file always requires a controller with a Home button**, USB
+  keyboard or not.
 
-L Trig & Start - Pause/Unpause - warning, this may crash you game as it just holds CPU clock cycles
+From the USB keyboard itself, the following work directly (no controller
+needed) via `src/fpga/core/keyboard.sv`'s F-key detection:
 
-L Trig & Select - Issue NMI
+- F4-F8 (no modifier) - machine speed/architecture shortcuts
+- F9 (no modifier) - Pause/Unpause
+- Alt+F11 - cold reset
+- Ctrl+F11 - warm reset
+- Ctrl+Alt+F11 - shadow ROM reset (not on +3 models)
 
 
 
 ### Change Log
+
+### Unreleased (this fork)
+
+Added - Real USB keyboard support via the Analogue Dock. `src/fpga/core/keyboard.sv` decodes the USB HID report directly to the Spectrum matrix every cycle (no PS/2 intermediate step, no per-key state) - see `src/fpga/core/usbkbd/README.md` for the full architecture and what is and isn't reachable from the keyboard (menu access remains controller-only, see above).
+
+Fixed - `Fn`/`mod` (F-key and modifier shortcuts) were declared as `wire` but driven procedurally from the OSD soft CPU, which would fail synthesis. They are now driven correctly and merged with the hardware-keyboard source.
+
+Added - Independent Player 1 / Player 2 Joystick type selectors, replacing the old single shared Joystick option (which had unused, commented-out `cont2_key` wiring already sketched in - finished it properly instead). Each of the two attached controllers picks Kempston/Sinclair I/Sinclair II/Cursor independently; the two can never be set to the same type (enforced in the OSD menu itself). Key Mapped Joystick is now a separate on/off toggle for Player 1 rather than one of the shared type choices.
+
+Added - Real USB mouse support via the Analogue Dock (Kempston Mouse). `src/fpga/core/mouse.v` was already vendored from the original MiSTer core but entirely unused/dead code, wired for a PS/2 mouse packet the Pocket port never had a source for. Rewired to take the Dock's mouse report (cont4_key/cont4_joy/cont4_trig, type 0x5) directly instead - no PS/2 packet format anywhere in the path, same approach as the keyboard work above. `mouse.v`'s accumulator runs on clk_74a (same reasoning as the keyboard bridge - this device is 92%+ ALM-full with little clk_sys margin to spare); the Kempston I/O-port address decode stays on clk_sys in `core_top.sv` since a Z80 I/O read needs to resolve within a few clk_sys cycles. The "Mouse:" menu option (Disabled/Kempston L/R/Kempston R/L) was already fully wired in the OSD firmware from before; only the RTL side needed connecting.
+
+Changed - Player 2 Joystick default from Sinclair II to Sinclair I - a more common pairing with Player 1's Kempston default across the game library (the two still can never be set to the same type). Both remain selectable in the "Player 2 Joystick:" menu regardless of default.
+
+**Note on Analogue's "little endian byte order" docs**: for `cont4_joy`/`cont4_trig`'s X/Y delta fields, this phrase does NOT mean a genuine 16-bit signed value - it's a standard 8-bit HID delta with a reserved/always-zero padding byte, and the meaningful byte sits at the HIGH half of the 16-bit field (bits[15:8]), not the low half. Confirmed the hard way (real hardware, two wrong attempts - see `core_top.sv`'s `mouse_dx_74a`/`mouse_dy_74a` comment for the full story) and independently confirmed as the same convention on a second, unrelated openFPGA core's docked-mouse work, so treat this as a general Analogue platform convention rather than a coincidence if you're decoding any other "byte + reserved byte, little endian" field from their docs.
 
 ### v0.7.0-beta
 

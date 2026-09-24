@@ -379,9 +379,11 @@ void encode_status() {
 	status_bits[14]=menuListVals[0x0f] & 0x01;		//ULA+ 14
 	/*status_bits[15]=menuListVals[0x05] & 0x01;		//Scandoubler 15-16
 	status_bits[16]=(menuListVals[0x05] >>1) & 0x01;*/
-	status_bits[17]=menuListVals[0x01] & 0x01;		//joystick 17-19
-	status_bits[18]=(menuListVals[0x01] >>1) & 0x01;
-	status_bits[19]=(menuListVals[0x01] >>2) & 0x01;
+	//status_bits[17:19] previously encoded the single shared joystick
+	//type (Kempston/Sinclair I/Sinclair II/Cursor/Key Mapped); retired in
+	//favour of independent Player 1/Player 2 selectors at 43-47 below.
+	//Left unused rather than reassigned, so an old saved status value
+	//can't accidentally alias into something meaningful here.
 	status_bits[20]=menuListVals[0x08] & 0x01;		//General Sound 20-21
 	status_bits[21]=(menuListVals[0x08] >>1) & 0x01;
 	status_bits[22]=menuListVals[0x03] & 0x01;		//cpu speed 22-24
@@ -405,10 +407,28 @@ void encode_status() {
 	status_bits[40]=menuListVals[0x0b] & 0x01;		//PSG Stereo 40
 	status_bits[41]=menuListVals[0x0c] & 0x01;		//PSG Model 41
 	status_bits[42]=(menuType[1] [7]>>24) & 0x01;	//Disk LED
-	
+	status_bits[43]=menuListVals[0x01] & 0x01;		//Player 1 joystick 43-44
+	status_bits[44]=(menuListVals[0x01] >>1) & 0x01;
+	status_bits[45]=menuListVals[0x15] & 0x01;		//Player 2 joystick 45-46
+	status_bits[46]=(menuListVals[0x15] >>1) & 0x01;
+	status_bits[47]=(menuType[0] [6]>>24) & 0x01;	//Key Mapped Joystick (P1) on/off
+
 	uint32_t i;
-	
-	for (i=43;i<64;i++) { //zero unused bits
+
+	// "Unused" starts at 48, not 43 - bits 43-47 (Player 1/Player 2
+	// Joystick type, Key Mapped Joystick enable, just set above) are very
+	// much used. This boundary has been bumped once before, the same way,
+	// each time a new bit was added below it (see git history for the
+	// 42->43 move when Disk LED/bit 42 was added) - the P1/P2 joystick
+	// refactor that added 43-47 missed doing it again, so every menu
+	// interaction was zeroing these 5 bits back out immediately after
+	// setting them, right before they got sent to the core. In practice
+	// that pinned status[46:43] at 0 permanently regardless of what the
+	// OSD showed, which - combined with core_top.sv's joystick-select
+	// ternaries always taking the p1type==0 branch first - meant Kempston
+	// was hardwired to controller 1 no matter what either player's menu
+	// said, and Sinclair I/II/Cursor could never be selected by anyone.
+	for (i=48;i<64;i++) { //zero unused bits
 		status_bits[i]=0;
 	}
 	
@@ -447,9 +467,8 @@ void decode_status() {
 	menuListVals[0x12]=status_bits[10] | (status_bits[11] <<1) | (status_bits[12] <<2);				//Memory 10-12	
 	menuListVals[0x0e]=status_bits[13]; 							//Port #FF 13
 	menuListVals[0x0f]=status_bits[14]; 							//ULA+ 14
-	//menuListVals[0x05]=status_bits[15] | (status_bits[16] <<1);		//Scandoubler 15-16	
-	menuListVals[0x01]=status_bits[17] | (status_bits[18] <<1) | (status_bits[19] <<2);		//joystick 17-19
-	menuListVals[0x08]=status_bits[20] | (status_bits[21] <<1);		//General Sound 20-21	
+	//menuListVals[0x05]=status_bits[15] | (status_bits[16] <<1);		//Scandoubler 15-16
+	menuListVals[0x08]=status_bits[20] | (status_bits[21] <<1);		//General Sound 20-21
 	menuListVals[0x03]=status_bits[22] | (status_bits[23] <<1) | (status_bits[24] <<2);		//cpu speed 22-24	
 	menuListVals[0x10]=status_bits[25]; 							//snow bug 25
 	//menuListVals[0x07]=status_bits[26] | (status_bits[27] <<1);		//scale 26-27	
@@ -463,7 +482,10 @@ void decode_status() {
 	menuListVals[0x0b]=status_bits[40]; 							//PSG Stereo 40
 	menuListVals[0x0c]=status_bits[41]; 							//PSG Model 41
 	menuType[1] [7]=updateMenuType(menuType[1] [7],status_bits[42]);	//Disk LED on/off
-	
+	menuListVals[0x01]=status_bits[43] | (status_bits[44] <<1);		//Player 1 joystick 43-44
+	menuListVals[0x15]=status_bits[45] | (status_bits[46] <<1);		//Player 2 joystick 45-46
+	menuType[0] [6]=updateMenuType(menuType[0] [6],status_bits[47]);	//Key Mapped Joystick (P1) on/off
+
 
 	if (menu_on) writeMenu();
 
@@ -504,17 +526,18 @@ void initMenus() {
 	strcpyr(&menuItems[0] [1] [0],"Audio & Video");
 	strcpyr(&menuItems[0] [2] [0],"Hardware");
 	strcpyr(&menuItems[0] [3] [0],"Keyboard:");
-	strcpyr(&menuItems[0] [4] [0],"Joystick:");
-	strcpyr(&menuItems[0] [5] [0],"Map Keyboard Joystick");
-	strcpyr(&menuItems[0] [6] [0],"Mouse:");
-	strcpyr(&menuItems[0] [7] [0],"Tape Options");
-	//strcpyr(&menuItems[0] [8] [0],"Tape Sound:");
-	strcpyr(&menuItems[0] [8] [0],"CPU Speed:");
-	strcpyr(&menuItems[0] [9] [0],"Reset & Apply");
-	strcpyr(&menuItems[0] [10] [0],"Other Reset Options");
-	strcpyr(&menuItems[0] [11] [0],"Quick Model Select");
-	strcpyr(&menuItems[0] [12] [0],"END");
-	
+	strcpyr(&menuItems[0] [4] [0],"Player 1 Joystick:");
+	strcpyr(&menuItems[0] [5] [0],"Player 2 Joystick:");
+	strcpyr(&menuItems[0] [6] [0],"Key Mapped Joystick (P1):");
+	strcpyr(&menuItems[0] [7] [0],"Map Keyboard Joystick");
+	strcpyr(&menuItems[0] [8] [0],"Mouse:");
+	strcpyr(&menuItems[0] [9] [0],"Tape Options");
+	strcpyr(&menuItems[0] [10] [0],"CPU Speed:");
+	strcpyr(&menuItems[0] [11] [0],"Reset & Apply");
+	strcpyr(&menuItems[0] [12] [0],"Other Reset Options");
+	strcpyr(&menuItems[0] [13] [0],"Quick Model Select");
+	strcpyr(&menuItems[0] [14] [0],"END");
+
 	menuType[0] [0] = 0x00000001;
 	menuType[0] [1] = 0x01000102;
 	menuType[0] [2] = 0x02000103;
@@ -524,39 +547,54 @@ void initMenus() {
 	strcpyr(&menuLists[0x00] [2] [0]," Recreated");
 	strcpyr(&menuLists[0x00] [3] [0],"Recr+Ghost");
 	menuListVals[0x00]=0;
-	
-	menuType[0] [4] = 0x01050205;
+
+	//Player 1 and Player 2 Joystick lists share the same 4 options
+	//(Kempston/Sinclair I/Sinclair II/Cursor - "Key Mapped" moved to its
+	//own on/off item below since it isn't one of these player slots) but
+	//use separate list ids so each player's current selection is tracked
+	//independently. process_menu()'s case 2 (list) enforces that the two
+	//lists can never both land on the same value - see the v==0x01/0x15
+	//checks there.
+	menuType[0] [4] = 0x01040205;		//Player 1 Joystick - list id 0x01, 4 entries
 	strcpyr(&menuLists[0x01] [0] [0],"     Kempston");
 	strcpyr(&menuLists[0x01] [1] [0],"   Sinclair I");
 	strcpyr(&menuLists[0x01] [2] [0],"  Sinclair II");
 	strcpyr(&menuLists[0x01] [3] [0],"       Cursor");
-	strcpyr(&menuLists[0x01] [4] [0],"   Key Mapped");
-	menuListVals[0x01]=0;
-	
-	menuType[0] [5] = 0x00000506;		
-	
-	menuType[0] [6] = 0x02030207;
+	menuListVals[0x01]=0;			//default Player 1 = Kempston
+
+	menuType[0] [5] = 0x1504020c;		//Player 2 Joystick - list id 0x15, 4 entries
+	strcpyr(&menuLists[0x15] [0] [0],"     Kempston");
+	strcpyr(&menuLists[0x15] [1] [0],"   Sinclair I");
+	strcpyr(&menuLists[0x15] [2] [0],"  Sinclair II");
+	strcpyr(&menuLists[0x15] [3] [0],"       Cursor");
+	menuListVals[0x15]=1;			//default Player 2 = Sinclair I (non-conflicting with Player 1's default; more games offer a Kempston+Sinclair I pairing than Kempston+Sinclair II)
+
+	menuType[0] [6] = 0x0000040d;		//Key Mapped Joystick (P1) on/off, default off
+
+	menuType[0] [7] = 0x00000506;
+
+	menuType[0] [8] = 0x02030207;
 	strcpyr(&menuLists[0x02] [0] [0],"    Disabled");
 	strcpyr(&menuLists[0x02] [1] [0],"Kempston L/R");
 	strcpyr(&menuLists[0x02] [2] [0],"Kempston R/L");
 	menuListVals[2]=0;
-		
-	menuType[0] [7] = 0x05000140;	
-	
-	menuType[0] [8] = 0x0305020a;
+
+	menuType[0] [9] = 0x05000140;
+
+	menuType[0] [10] = 0x0305020a;
 	strcpyr(&menuLists[0x03] [0] [0],"Original");
 	strcpyr(&menuLists[0x03] [1] [0],"    7MHz");
 	strcpyr(&menuLists[0x03] [2] [0],"   14Mhz");
 	strcpyr(&menuLists[0x03] [3] [0],"   28Mhz");
-	strcpyr(&menuLists[0x03] [4] [0],"   56Mhz");	
+	strcpyr(&menuLists[0x03] [4] [0],"   56Mhz");
 	menuListVals[3]=0;
-	
-	menuType[0] [9] = 0x0000090b;
-	
-	menuType[0] [10] = 0x03000102;
-	menuType[0] [11] = 0x04000103;
-	
-	//strcpyr(&menuItems[0] [12] [0],"END");
+
+	menuType[0] [11] = 0x0000090b;
+
+	menuType[0] [12] = 0x03000102;
+	menuType[0] [13] = 0x04000103;
+
+	//strcpyr(&menuItems[0] [14] [0],"END");
 	
 	
 	strcpyr(&menuItems[1] [0] [0],"AUDIO & VIDEO");
@@ -817,12 +855,21 @@ void process_menu(uint32_t mask) {
 				oldpos=1;
 				updateCursor();
 			break;
-			case 2:		//list				
+			case 2:		//list
 				v=(menuType[currmenu] [cursorpos] >> 24) & 0xff; //get list id
 				e=(menuType[currmenu] [cursorpos] >> 16) & 0xff; //get num lid entries
 				m=menuListVals[v];
 				m++;
 				if (m==e) m=0;
+				//Player 1 Joystick (list 0x01) and Player 2 Joystick (list
+				//0x15) share the same 4 options but must never both land
+				//on the same one - skip past whichever value the OTHER
+				//player currently holds. Only one value can ever be
+				//disallowed at a time, so a single extra step (with the
+				//same wraparound) is always enough - it can never land on
+				//a second disallowed value.
+				if ((v==0x01) && (m==menuListVals[0x15])) { m++; if (m==e) m=0; }
+				if ((v==0x15) && (m==menuListVals[0x01])) { m++; if (m==e) m=0; }
 				menuListVals[v]=m;
 				writeMenu();
 			break;

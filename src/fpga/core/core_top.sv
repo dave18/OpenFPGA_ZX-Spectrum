@@ -520,7 +520,7 @@ wire [7:0] cpu_din =
 		fdc_sel  ? fdc_dout                                   :
 		mf3_port ? (&addr[14:13] ? page_reg : page_reg_plus3) :
 		mmc_sel  ? mmc_dout                                   :
-		kemp_sel ? kemp_dout                                  :
+		(kemp_sel | mouse_sel) ? kemp_dout                    :
 		portBF   ? {page_scr_copy, 7'b1111111}                :
 		gs_sel   ? gs_dout                                    :
 		psg_rd   ? psg_dout                                   :
@@ -1276,8 +1276,17 @@ end*/
 reg [63:0] status;
 reg  status_set;
 reg  status_ack;
-wire [11:1] Fn;
-wire  [2:0] mod;
+
+// Fn/mod are driven from two sources: the picorv32 OSD/virtual-keyboard soft
+// CPU (Fn_pico/mod_pico) and the real USB keyboard bridge (Fn_hw/mod_hw, see
+// the "USB Keyboard" section below). Combine them so F-key/modifier shortcuts
+// (arch select, pause, reset, tape control, NMI) work from either source.
+reg  [11:1] Fn_pico = 0;
+reg   [2:0] mod_pico = 0;
+wire [11:1] Fn_hw;
+wire  [2:0] mod_hw;
+wire [11:1] Fn  = Fn_pico | Fn_hw;
+wire  [2:0] mod = mod_pico | mod_hw;
 
 
 reg [31:0] pico_mem_rd;
@@ -1661,8 +1670,8 @@ begin
 			32'h3000_05_3c: joykb_keyrow7F[9]<=pico_mem_wr[4:0];
 			
 			32'h3000_06_00: begin
-				Fn<=pico_mem_wr[10:0];
-				mod<=pico_mem_wr[18:16];
+				Fn_pico<=pico_mem_wr[10:0];
+				mod_pico<=pico_mem_wr[18:16];
 			end
 			
 			32'h4000_00_00: ioctl_size_req<=pico_mem_wr;
@@ -1728,6 +1737,57 @@ wire [15:0] cont1_key_s;
       cont1_key_s,
       ce_7mp
   );
+
+// Second attached controller, for the independent Player 2 joystick
+// selector below - same treatment as cont1_key_s (matched clock, so the
+// two controllers' bits are sampled consistently relative to each other).
+wire [15:0] cont2_key_s;
+
+  synch_3 #(
+      .WIDTH(16)
+  ) cont2_s (
+      cont2_key,
+      cont2_key_s,
+      ce_7mp
+  );
+
+// Docked USB mouse report (Analogue's openFPGA bus-communication docs:
+// type 0x5 in cont4_key[31:28], report counter in cont4_key[15:0],
+// buttons in cont4_joy[31:16], relative X in cont4_joy[15:0], relative Y
+// in cont4_trig[15:0]).
+//
+// Synchronized into clk_74a, not clk_sys - same reasoning as the USB
+// keyboard bridge: this device is already 92%+ ALM-full, and clk_sys
+// itself has essentially no spare timing budget. A first attempt kept
+// the whole mouse.v accumulator (a 20-bit signed adder plus overflow
+// compare, run every time a report arrives) on clk_sys; CI's timing
+// report showed 2 violated paths afterward, and - notably - NEITHER
+// violating path was in the mouse logic itself: both were
+// core_top:ic|sdram:ram|refresh_count[9/10]~DUPLICATE -> SDRAM_A[*], the
+// SDRAM controller's pre-existing refresh logic, pushed over the edge by
+// the added placement pressure elsewhere on the die. Narrowing the
+// synchronizers to only the bits actually used made no difference at all
+// (byte-for-byte identical timing report) - Quartus was already pruning
+// the genuinely-unused bits regardless of how the synchronizer was
+// declared in source; the accumulator's own logic, by contrast, is
+// entirely load-bearing and can't be optimized away, so THAT is what
+// needed to move. clk_74a has demonstrated ample margin throughout this
+// project already; mouse reports are USB-polling-rate-spaced (>=1ms,
+// >7,000 clk_74a cycles apart at minimum), nowhere near fast enough for
+// plain synch_3 to ever miss a transition. Only the small, timing-
+// critical address-decode mux a Z80 I/O read actually needs within a
+// handful of clk_sys cycles stays on clk_sys - see mouse_dx/mouse_dy/
+// mouse_buttons_s below, synchronized back from clk_74a as plain
+// continuously-valid levels (self-healing against a torn CDC sample the
+// same way the keyboard matrix is, since there's no discrete event here
+// to lose - just a value that settles a cycle later if ever sampled
+// mid-change).
+wire [31:0] cont4_key_s;
+wire [31:0] cont4_joy_s;
+wire [15:0] cont4_trig_s;
+synch_3 #(.WIDTH(32)) cont4_key_sync  (cont4_key,  cont4_key_s,  clk_74a);
+synch_3 #(.WIDTH(32)) cont4_joy_sync  (cont4_joy,  cont4_joy_s,  clk_74a);
+synch_3 #(.WIDTH(16)) cont4_trig_sync (cont4_trig, cont4_trig_s, clk_74a);
 
 reg [4:0] key_data;
 initial begin
@@ -1913,53 +1973,210 @@ end
 //reg  [4:0] kbd_dout;
 //always @(posedge clk_sys) kbd_dout <= key_data;
 
-/*
-wire [11:1] Fn;
-wire  [2:0] mod;
-wire  [4:0] key_data;
-wire recreated_zx = status[37];
-wire ghosting     = status[36];
-keyboard kbd( .* );
+////////////////////   USB Keyboard   ////////////////////
+// Converts the Pocket's docked-USB-keyboard controller-bus report (cont3_*)
+// directly into the Spectrum keyboard matrix - no PS/2 intermediate step,
+// no MiSTer-style ps2_key toggle/strobe convention, no per-HID-slot state
+// tracking. See src/fpga/core/keyboard.sv and src/fpga/core/usbkbd/README.md.
+//
+// cont3_key/cont3_joy/cont3_trig are APF bridge inputs, not natively in
+// clk_sys's domain - cont1_key gets the equivalent treatment (via synch_3)
+// elsewhere in this file. Without it, a bus sampled mid-transition can
+// tear (different bits caught on different sides of a change), which
+// apf2hid's own pipeline downstream doesn't fix since it just re-registers
+// whatever value it was handed, torn or not. Unlike the old PS/2 bridge's
+// edge-triggered events, keyboard.sv's decode re-runs from this snapshot
+// every clk_sys cycle, so there's no discrete event that a mid-transition
+// sample could corrupt or lose - a torn sample here just self-corrects on
+// the very next cycle once the source has settled.
+wire [31:0] cont3_key_s;
+wire [31:0] cont3_joy_s;
+wire [15:0] cont3_trig_s;
+synch_3 #(.WIDTH(32)) cont3_key_sync  (cont3_key,  cont3_key_s,  clk_sys);
+synch_3 #(.WIDTH(32)) cont3_joy_sync  (cont3_joy,  cont3_joy_s,  clk_sys);
+synch_3 #(.WIDTH(16)) cont3_trig_sync (cont3_trig, cont3_trig_s, clk_sys);
 
-wire  [7:0] mouse_data=8'h0;;
+wire  [7:0] usb_kb_mod, usb_kb_sc1, usb_kb_sc2, usb_kb_sc3, usb_kb_sc4, usb_kb_sc5, usb_kb_sc6;
 
-mouse mouse( .*, .reset(cold_reset), .addr(addr[10:8]), .sel(), .dout(mouse_data), .btn_swap(status[35]));
-*/
+apf2hid u_apf2hid
+(
+	.clk        ( clk_sys      ),
+	.reset      ( reset        ),
+	.cont3_key  ( cont3_key_s  ),
+	.cont3_joy  ( cont3_joy_s  ),
+	.cont3_trig ( cont3_trig_s ),
+	.usb_kb_mod ( usb_kb_mod   ),
+	.usb_kb_sc1 ( usb_kb_sc1   ),
+	.usb_kb_sc2 ( usb_kb_sc2   ),
+	.usb_kb_sc3 ( usb_kb_sc3   ),
+	.usb_kb_sc4 ( usb_kb_sc4   ),
+	.usb_kb_sc5 ( usb_kb_sc5   ),
+	.usb_kb_sc6 ( usb_kb_sc6   )
+);
+
+wire       recreated_zx = 1'b0; // alternate non-QWERTY "Recreated ZX Spectrum" mapping - not exposed in the Pocket menu yet
+wire       ghosting     = 1'b0; // emulate real keyboard-matrix ghosting - not exposed in the Pocket menu yet
+wire [4:0] hw_key_data;
+
+keyboard kbd
+(
+	.reset       ( reset        ),
+	.clk_sys     ( clk_sys      ),
+	.hid_mod     ( usb_kb_mod   ),
+	.hid_sc1     ( usb_kb_sc1   ),
+	.hid_sc2     ( usb_kb_sc2   ),
+	.hid_sc3     ( usb_kb_sc3   ),
+	.hid_sc4     ( usb_kb_sc4   ),
+	.hid_sc5     ( usb_kb_sc5   ),
+	.hid_sc6     ( usb_kb_sc6   ),
+	.recreated_zx( recreated_zx ),
+	.ghosting    ( ghosting     ),
+	.addr        ( addr         ),
+	.key_data    ( hw_key_data  ),
+	.Fn          ( Fn_hw        ),
+	.mod         ( mod_hw       )
+);
+
 wire       kemp_sel = addr[5:0] == 6'h1F;
-//reg  [7:0] kemp_dout;
+// Note: kemp_sel's partial 6-bit decode (pre-existing, not changed here)
+// happens to also match every Kempston Mouse port address (0xFADF/
+// 0xFBDF/0xFFDF all share the same low 6 bits as 0x1F). With the mouse
+// disabled in the menu, reading a mouse port therefore still returns
+// joystick data via kemp_dout's fallback rather than an empty-bus
+// response - harmless for any software using the canonical addresses,
+// but worth knowing about. Left alone deliberately (untouched,
+// pre-existing behaviour, out of scope for the mouse work below) rather
+// than tightened to a full addr[7:0]==8'h1F match without being able to
+// verify nothing relies on the current looser decode.
 
-wire [7:0] kemp_dout =  vkb_state?8'h00:{2'b00, joyk}; //disable kempton input when virtual keyboard is active
+// Docked USB mouse -> Kempston Mouse, direct from the cont4_* report
+// (see the cont4_*_s synchronizers above) - no PS/2 mouse packet
+// anywhere in this path. status[35:34]: 0=Disabled, nonzero=enabled;
+// status[35] doubles as the left/right button swap flag, matching
+// upstream MiSTer's own status[35] usage for the same purpose.
+//
+// is_mouse/mouse_counter/mouse_dx/mouse_dy/mouse_buttons and the mouse.v
+// instance itself all run on clk_74a now (see the cont4_*_s
+// synchronizers' comment above for why) - only mouse_en, the final
+// dx/dy/buttons synchronized level outputs, and the addr-based port
+// decode below stay on clk_sys, since a Z80 I/O read needs those
+// resolved within a handful of clk_sys cycles.
+wire       mouse_en   = |status[35:34];
+wire       is_mouse_74a   = cont4_key_s[31:28] == 4'h5;
+// Hold the report counter at a fixed value whenever cont4 isn't
+// currently reporting a mouse, so mouse.v's "did the counter change"
+// check can never fire on an unrelated gamepad's cont4 traffic (which
+// uses a completely different layout at these same bit positions) -
+// see mouse.v's header comment.
+wire [15:0] mouse_counter_74a = is_mouse_74a ? cont4_key_s[15:0] : 16'h0;
+// Analogue's docs call cont4_joy[15:0]/cont4_trig[15:0] a 16-bit signed
+// delta, but standard USB HID boot-mouse reports only ever carry an
+// 8-bit signed delta per axis (byte1/byte2 of the report: buttons, dx,
+// dy) - confirmed on real hardware (8BitDo wireless mouse): treating the
+// full 16 bits as signed made left/right movement barely twitch a couple
+// of pixels before sticking, exactly the signature of a negative 8-bit
+// delta (high byte 0, not sign-extended) getting read as a huge positive
+// 16-bit number and instantly saturating the accumulator.
+//
+// The real delta byte sits at bits[15:8], not bits[7:0] - "little
+// endian byte order" here describes how the APF bridge packs a single
+// meaningful HID byte plus one reserved/padding byte into a 16-bit
+// register, and the SAME convention already confirmed working for the
+// keyboard's modifier byte (cont3_key[15:0], see apf2hid.sv) puts that
+// meaningful byte at the TOP, not the bottom: usb_kb_mod there reads
+// kb_scancodes[63:56], the high byte of that field, not the low byte.
+// A first attempt here read bits[7:0] (the reserved/always-zero byte)
+// instead, which produced a constant zero delta - confirmed on real
+// hardware as "buttons still work, no movement at all".
+wire signed [15:0] mouse_dx_74a = {{8{cont4_joy_s[15]}},  cont4_joy_s[15:8]};
+wire signed [15:0] mouse_dy_74a = {{8{cont4_trig_s[15]}}, cont4_trig_s[15:8]};
+wire  [2:0] mouse_buttons_74a   = cont4_joy_s[18:16]; // {middle,right,left}
 
-/*reg        kemp_mode = 0;
-always @(posedge clk_sys) begin
-	reg old_status = 0;
+wire  [7:0] mouse_dx_74a_out, mouse_dy_74a_out;
+wire  [2:0] mouse_buttons_74a_out;
+mouse u_mouse
+(
+	.clk         ( clk_74a             ),
+	.reset       ( cold_reset          ),
+	.hid_counter ( mouse_counter_74a   ),
+	.hid_dx      ( mouse_dx_74a        ),
+	.hid_dy      ( mouse_dy_74a        ),
+	.hid_buttons ( mouse_buttons_74a   ),
+	.dx_out      ( mouse_dx_74a_out    ),
+	.dy_out      ( mouse_dy_74a_out    ),
+	.buttons_out ( mouse_buttons_74a_out )
+);
 
-	if(reset || joyk || !status[35:34]) kemp_mode <= 0;
+// Plain level synchronizer, not a toggle/queue - mouse.v's outputs are
+// continuously valid (re-derived every clk_74a cycle from whatever the
+// accumulator currently holds, not a one-shot event), so a torn sample
+// here just means clk_sys reads a stale-by-one-cycle value that
+// self-corrects on the very next sample once the source has settled -
+// same reasoning as the keyboard matrix's own CDC, no handshake needed.
+wire [7:0] mouse_dx_s, mouse_dy_s;
+wire [2:0] mouse_buttons_s;
+synch_3 #(.WIDTH(19)) mouse_out_sync ({mouse_buttons_74a_out, mouse_dx_74a_out, mouse_dy_74a_out}, {mouse_buttons_s, mouse_dx_s, mouse_dy_s}, clk_sys);
 
-	old_status <= ps2_mouse[24];
-	if(old_status != ps2_mouse[24] && status[35:34]) kemp_mode <= 1;
-
-	kemp_dout <= kemp_mode ? mouse_data : {2'b00, joyk};
+// addr[10:8] register select (#FADF/#FBDF/#FFDF -> buttons/X/Y) - the
+// address decode itself doesn't care whether a mouse is actually
+// connected right now (real Kempston Mouse hardware responds to these
+// ports unconditionally when addressed; mouse.v's accumulator just holds
+// whatever it last had, defaulting to dx=128/dy=0/no buttons if a mouse
+// was never connected - "is a mouse currently attached" only matters for
+// whether the accumulator ever updates, not for whether the port
+// responds).
+wire       mouse_reg_sel = (addr[10:8] == 3'b011) || (addr[10:8] == 3'b111) || (addr[9:8] == 2'b10);
+wire       mouse_sel     = mouse_en & (addr[7:0] == 8'hDF) & mouse_reg_sel;
+reg  [7:0] mouse_data;
+always @* begin
+	casex (addr[10:8])
+		3'b011:  mouse_data = mouse_dx_s;
+		3'b111:  mouse_data = mouse_dy_s;
+		3'bX10:  mouse_data = ~{5'b00000, mouse_buttons_s[2], mouse_buttons_s[~status[35]], mouse_buttons_s[status[35]]};
+		default: mouse_data = 8'hFF;
+	endcase
 end
-*/
-wire [2:0] jsel  = status[19:17];
+
+wire [7:0] kemp_dout =  vkb_state ? 8'h00 : mouse_sel ? mouse_data : {2'b00, joyk}; //disable kempton input when virtual keyboard is active
+// Player 1 / Player 2 Joystick type selectors - replaces the old single
+// shared jsel (status[19:17], now retired - see main.c). Each
+// independently picks Kempston/Sinclair I/Sinclair II/Cursor; the OSD
+// firmware enforces the two can never select the same type
+// (process_menu()'s case 2 list handler in main.c skips over whichever
+// value the other player currently holds), so for any convention below,
+// at most one of (p1type==N, p2type==N) is ever true - whichever player
+// currently holds a convention drives it from their own controller; if
+// neither player has it, it's inactive (matching the original design's
+// all-zero "not this jsel value" behaviour, just decided per-player-slot
+// now instead of by a single global selector).
+wire [1:0] p1type    = status[44:43]; // 0=Kempston 1=Sinclair I 2=Sinclair II 3=Cursor
+wire [1:0] p2type    = status[46:45]; // same encoding
+wire       keymap_en = status[47];    // Key Mapped Joystick (P1) - independent on/off, not part of the P1/P2 slot system
 
 //kempston port 1F
-//wire [5:0] joyk  = !jsel ? (joy0[5:0] | joy1[5:0]) : 6'd0;
-wire [5:0] joyk  = !jsel ? {cont1_key_s[5],cont1_key_s[4],cont1_key_s[0],cont1_key_s[1],cont1_key_s[2],cont1_key_s[3]} : 6'd0;
+wire [5:0] joyk  = (p1type==0) ? {cont1_key_s[5],cont1_key_s[4],cont1_key_s[0],cont1_key_s[1],cont1_key_s[2],cont1_key_s[3]}
+                 : (p2type==0) ? {cont2_key_s[5],cont2_key_s[4],cont2_key_s[0],cont2_key_s[1],cont2_key_s[2],cont2_key_s[3]}
+                 : 6'd0;
 
 //sinclair 1 67890
-wire [4:0] joys1 = ({5{jsel[2:0]==1}} & {cont1_key_s[2], cont1_key_s[3], cont1_key_s[1], cont1_key_s[0], cont1_key_s[4]});// | ({5{jsel[1:0]==1}} & {cont2_key_s[2], cont2_key_s[3], cont2_key_s[1], cont2_key_s[0], cont2_key_s[4]});
+wire [4:0] joys1 = (p1type==1) ? {cont1_key_s[2], cont1_key_s[3], cont1_key_s[1], cont1_key_s[0], cont1_key_s[4]}
+                 : (p2type==1) ? {cont2_key_s[2], cont2_key_s[3], cont2_key_s[1], cont2_key_s[0], cont2_key_s[4]}
+                 : 5'd0;
 
 //sinclair 2 12345
-wire [4:0] joys2 = ({5{jsel[2:0]==2}} & {cont1_key_s[4], cont1_key_s[0], cont1_key_s[1], cont1_key_s[3], cont1_key_s[2]});// |({5{jsel[1]}} & {cont2_key_s[4], cont2_key_s[0], cont2_key_s[1], cont2_key_s[3], cont2_key_s[2]});
+wire [4:0] joys2 = (p1type==2) ? {cont1_key_s[4], cont1_key_s[0], cont1_key_s[1], cont1_key_s[3], cont1_key_s[2]}
+                 : (p2type==2) ? {cont2_key_s[4], cont2_key_s[0], cont2_key_s[1], cont2_key_s[3], cont2_key_s[2]}
+                 : 5'd0;
 
 //cursor 56780
-wire [4:0] joyc1 = {5{jsel[2:0]==3}} & ({cont1_key_s[1], cont1_key_s[0], cont1_key_s[3],1'b0, cont1_key_s[4]});// | {cont2_key_s[1], cont2_key_s[0], cont2_key_s[3], 1'b0, cont2_key_s[4]});
-//wire [4:0] joyc2 = {5{jsel[2]}} & {cont1_key_s[2] | cont2_key_s[2], 4'b0000};
-wire [4:0] joyc2 = {5{jsel[2:0]==3}} & {cont1_key_s[2] , 4'b0000};
+wire [4:0] joyc1 = (p1type==3) ? {cont1_key_s[1], cont1_key_s[0], cont1_key_s[3], 1'b0, cont1_key_s[4]}
+                 : (p2type==3) ? {cont2_key_s[1], cont2_key_s[0], cont2_key_s[3], 1'b0, cont2_key_s[4]}
+                 : 5'd0;
+wire [4:0] joyc2 = (p1type==3) ? {cont1_key_s[2], 4'b0000}
+                 : (p2type==3) ? {cont2_key_s[2], 4'b0000}
+                 : 5'd0;
 
-wire [4:0] joykb1 = {5{jsel[2:0]!=4}} | (joykey_final);// | {cont2_key_s[1], cont2_key_s[0], cont2_key_s[3], 1'b0, cont2_key_s[4]});
+wire [4:0] joykb1 = keymap_en ? joykey_final : 5'b11111;
 
 
 
@@ -1969,7 +2186,7 @@ wire [4:0] joy_kbd = osd_active?5'b11111:({5{addr[12]}} | ~(joys1 | joyc1)) & ({
 
 reg  [4:0] kbd_dout;
 
-always @(posedge clk_sys) kbd_dout <= key_data & joy_kbd;
+always @(posedge clk_sys) kbd_dout <= key_data & joy_kbd & hw_key_data;
 
 //////////////////   MF128   ///////////////////
 reg         mf128_mem;

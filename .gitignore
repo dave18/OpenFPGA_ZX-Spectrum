@@ -1,0 +1,12 @@
+# picorv32 OSD/menu firmware build output (built by src/firmware/Makefile, or
+# the "Build firmware" CI step, before the Quartus compile - see core/sprom.v)
+src/firmware/*.o
+src/firmware/*.elf
+src/firmware/*.bin
+src/firmware/*.hex
+src/firmware/*.vh
+
+# Quartus build output (not currently committed; keep it that way)
+src/fpga/output_files/
+src/fpga/db/
+src/fpga/incremental_db/

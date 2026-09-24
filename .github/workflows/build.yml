@@ -1,0 +1,80 @@
+name: Build core
+
+# Builds the Analogue Pocket bitstream with Intel Quartus Prime in Docker
+# (no local install needed - Quartus itself only runs on Windows/Linux, not
+# macOS) and packages a ready-to-install release zip as a workflow artifact.
+#
+# Quartus version: pinned to 18.1 to match the version this project's IP
+# (mf_pllbase, mf_audio_pll, pll, jt03, T80) was generated/tested with, per
+# README.md. A newer Quartus may prompt to upgrade those .qip IP cores,
+# which would hang a headless build.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build OSD/menu firmware
+        # core/sprom.v $readmemh's src/firmware/firmware.hex to init the
+        # picorv32 soft CPU's program ROM - it's not committed, so build it
+        # from source before Quartus reads the project.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang lld llvm bsdextrautils
+          make -C src/firmware
+
+      - name: Compile with Quartus
+        run: |
+          docker run --rm \
+            -v "$PWD:/build" -w /build/src/fpga \
+            raetro/quartus:18.1 \
+            bash -c 'quartus_sh --flow compile ap_core'
+
+      - name: Dump worst setup timing paths (clk_sys)
+        # ap_core.sta.rpt only has summary slack/TNS per clock, not the named
+        # critical path. report_worst_paths.tcl runs report_timing directly
+        # against the just-completed compile's database (fast - no re-fit)
+        # so a negative-slack summary can actually be root-caused.
+        run: |
+          docker run --rm \
+            -v "$PWD:/build" -w /build/src/fpga \
+            raetro/quartus:18.1 \
+            bash -c 'quartus_sta -t report_worst_paths.tcl ap_core'
+
+      - name: Convert RBF to bitstream.rbf_r
+        run: |
+          mkdir -p stage
+          cp -r dist/Cores dist/Platforms dist/Assets stage/
+          python3 tools/rbf_to_rbf_r.py \
+            src/fpga/output_files/ap_core.rbf \
+            stage/Cores/dave18.ZXSpectrum/bitstream.rbf_r
+
+      - name: Package release zip
+        run: |
+          cd stage
+          zip -r ../ZX-Spectrum.zip Cores Platforms Assets
+
+      - name: Upload release zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: ZX-Spectrum-pocket-core
+          path: ZX-Spectrum.zip
+          if-no-files-found: error
+
+      - name: Upload build reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: quartus-reports
+          path: |
+            src/fpga/output_files/*.rpt
+            src/fpga/output_files/*.summary
+          if-no-files-found: warn
