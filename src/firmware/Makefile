@@ -1,6 +1,9 @@
-OBJS = main.o start.o
+OBJS = main.o settings.o start.o
 
 all: firmware.hex
+
+main.o: main.h host.h settings.h charfontb.h
+settings.o: settings.h host.h
 
 %.o: %.c
 	clang --target=riscv32 -march=rv32imc -std=c99 -O3 -Os -fno-inline -mno-relax -Wall -Werror -c $< -o $@

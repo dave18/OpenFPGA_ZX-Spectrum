@@ -2,6 +2,7 @@
 #include "host.h"
 #include "main.h"
 #include "charfontb.h"
+#include "settings.h"
 
 int osd_width;
 int osd_char_width;
@@ -943,6 +944,8 @@ void process_menu(uint32_t mask) {
 			break;
 		}
 		encode_status();
+		if (mt==2 || mt==3 || mt==4) settings_preference_changed(currmenu,cursorpos);
+		if (mt==7) settings_model_selected(menuType[currmenu][cursorpos] & 0xff);
 		
 		if (mt==9) status0 |= 1;	//set reset flag
 		
@@ -1549,6 +1552,7 @@ void mapJoystick() {
 	IO_RW(IO_JOYK_0_5+(0x20*kbm_num))=kb_matrix[5];
 	IO_RW(IO_JOYK_0_6+(0x20*kbm_num))=kb_matrix[6];
 	IO_RW(IO_JOYK_0_7+(0x20*kbm_num))=kb_matrix[7];
+	settings_key_selected(kbm_num,kbmx,kbmy);
 		
 	kbm_num++;
 	}
@@ -1625,6 +1629,7 @@ void mountVHD() {
 
 
 void set_initial_keyval (unsigned int id, unsigned int addr,unsigned int x,unsigned int y,unsigned int w) {
+	settings_default_key(id,x,y);
 	keyjoy_xloc[id]=x;
 	keyjoy_yloc[id]=y;
 	keyjoy_locw[id]=w;	
@@ -1641,12 +1646,25 @@ void set_initial_keyval (unsigned int id, unsigned int addr,unsigned int x,unsig
 }
 
 
+// Restore actual key coordinates, separately from display-label coordinates.
+void settings_apply_key(unsigned int id,unsigned int x,unsigned int y)
+{
+	unsigned int label_x,width;
+	settings_key_label(x,y,&label_x,&width);
+	int previous_kb=kb_on;
+	kb_on=0;
+	set_initial_keyval(id,IO_JOYK_0_0+id*0x20,x,y,width);
+	kb_on=previous_kb;
+	keyjoy_xloc[id]=label_x;
+}
+
 //Note - external IO is 32 bit
 int main(void)
 {
 	debug_on=0;
 	filename[0]=0;
 	ext[0]=0;
+	settings_begin();
 	
 	initMenus();	
 	encode_status();
@@ -1700,6 +1718,11 @@ int main(void)
 	set_initial_keyval(7,IO_JOYK_7_0,0,4,1);	// Sym Shift (Y)
 	set_initial_keyval(8,IO_JOYK_8_0,0,3,2);	// Cap Shift (L)
 	set_initial_keyval(9,IO_JOYK_9_0,11,1,1);	// I (R)
+	settings_restore();
+	clearKeyboardMatrix();
+	encode_status();
+	IO_RW(IO_STATUS1)=status1;
+	IO_RW(IO_STATUS0)=status0 | 1;	//keep initialization reset until ROM loaded
 		
 	
 	

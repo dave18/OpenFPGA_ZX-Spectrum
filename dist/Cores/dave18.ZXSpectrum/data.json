@@ -52,10 +52,13 @@
         "name": "CFG",
         "id": "0x400",
         "required": false,
-        "deferload": true,
-        "parameters": 2,			
-        "filename": "",
-        "extensions": ["cfg"]        
+        "deferload": false,
+        "nonvolatile": true,
+        "parameters": 34,
+        "filename": "settings.cfg",
+        "extensions": ["cfg"],
+        "size_maximum": 128,
+        "address": "0x10000000"
     }
     ]
     }

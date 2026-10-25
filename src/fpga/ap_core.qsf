@@ -817,6 +817,7 @@ set_instance_assignment -name WEAK_PULL_UP_RESISTOR ON -to bridge_spimosi
 set_global_assignment -name EDA_SIMULATION_TOOL "ModelSim-Altera (Verilog)"
 set_global_assignment -name EDA_OUTPUT_DATA_FORMAT "VERILOG HDL" -section_id eda_simulation
 set_global_assignment -name SYSTEMVERILOG_FILE core/psram.sv
+set_global_assignment -name SYSTEMVERILOG_FILE core/settings_store.sv
 set_global_assignment -name SYSTEMVERILOG_FILE core/sd_card.sv
 set_global_assignment -name VERILOG_FILE core/divmmc.v
 set_global_assignment -name SYSTEMVERILOG_FILE core/sync_fifo.sv

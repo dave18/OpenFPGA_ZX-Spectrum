@@ -43,6 +43,23 @@ Select brings up virtual keyboard
 
 Start brings up menu
 
+### Persistent settings
+
+The existing core preferences and all ten key-mapped joystick bindings are saved
+automatically on normal core shutdown and restored on startup. Settings are global
+and stored in `/Saves/zxspectrum/dave18.ZXSpectrum/settings.cfg`. No new menu or
+Save button is required; delete the file to restore the original defaults.
+
+The file is a versioned, checksummed 128-byte binary record. Missing or corrupt
+records use defaults. Unsupported versions are preserved, with changes remaining
+session-only until the file is removed. Unexpected power loss or SD removal before
+Pocket flushes the file can lose changes.
+
+Game progress, tape position, loaded media, pause and NMI state are not saved.
+Snapshot-selected hardware does not overwrite the preferred startup model.
+The existing menus, controls, emulator clocks and audio implementation are unchanged.
+An updated bitstream must be built and installed together with the new `data.json`.
+
 L Trig & Start - Pause/Unpause - warning, this may crash you game as it just holds CPU clock cycles
 
 L Trig & Select - Issue NMI

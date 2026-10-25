@@ -49,6 +49,10 @@ typedef unsigned char uint8_t;
 #define IO_STATUS1 	0x204
 #define IO_STATUSC  0x208  //status change flag (if 1 when read then core has requested a status change - write 1 to acknowledge)
 
+#define SETTINGS_RAM 0x30001000
+#define SETTINGS_WORD(x) *(volatile unsigned int *)(SETTINGS_RAM+(x))
+#define SETTINGS_CONTROL *(volatile unsigned int *)0x30001080
+
 #define IO_REQ_ADDR 0x300
 
 #define IO_JOYK_0_0 	0x400

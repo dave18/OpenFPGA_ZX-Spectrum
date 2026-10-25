@@ -1292,6 +1292,24 @@ wire pico_reset_n=reset_n;
 
 reg pico_mem_ready;
 
+wire [31:0] settings_cpu_q;
+wire [1:0] settings_cpu_control;
+wire [31:0] settings_bridge_q;
+settings_store settings_storage (
+	.bridge_clk(clk_74a), .reset_n(reset_n),
+	.bridge_addr(bridge_addr), .bridge_rd(bridge_rd), .bridge_wr(bridge_wr),
+	.bridge_wr_data(bridge_wr_data), .bridge_rd_data(settings_bridge_q),
+	.slot_read(dataslot_requestread), .slot_read_id(dataslot_requestread_id),
+	.cpu_clk(clk_pico), .cpu_addr(pico_address[6:2]), .cpu_data(pico_mem_wr),
+	.cpu_wr(pico_reset_n && pico_mem_valid && (&pico_mem_wstrb) &&
+		(pico_address[31:7] == (32'h30001000 >> 7))),
+	.cpu_commit(pico_reset_n && pico_mem_valid && (&pico_mem_wstrb) &&
+		(pico_address == 32'h30001080)),
+	.cpu_q(settings_cpu_q), .cpu_control(settings_cpu_control),
+	.table_addr(datatable_addr), .table_wr(datatable_wren),
+	.table_data(datatable_data), .table_q(datatable_q)
+);
+
 //wire resetp=1'b0;
 wire clk_pico=ce_7mp;
   always @(posedge clk_pico) begin
@@ -1435,6 +1453,10 @@ begin
 		32'h3000_02_00: pico_mem_rd<={status[31:25], speed_set ? speed_req : 3'b000, status[21:13], arch_set ? arch : snap_hwset ? snap_hw : status[12:8], status[7:0]};
 		32'h3000_02_04: pico_mem_rd<=status[63:32];
 		32'h3000_02_08: pico_mem_rd<={31'h0,status_set};
+		32'h3000_10_80: pico_mem_rd<={30'h0,settings_cpu_control};
+		32'h3000_10_0x, 32'h3000_10_1x, 32'h3000_10_2x, 32'h3000_10_3x,
+		32'h3000_10_4x, 32'h3000_10_5x, 32'h3000_10_6x, 32'h3000_10_7x:
+			pico_mem_rd<=settings_cpu_q;
 		
 		//debug outputs to soft cpu
 		/*32'h3000_0800:	pico_mem_rd<={15'h0,status_running,1'b0,target_dataslot_err_s,ioctl_state,1'h0,target_dataslot_ack_s,ioctl_wait,rom_loaded,3'h0,ram_ready};	//debug ioctl_state
@@ -2553,9 +2575,7 @@ always @(*) begin
         bridge_rd_data <= 0;
     end
     32'h10xxxxxx: begin
-        // example
-        // bridge_rd_data <= example_device_data;
-        bridge_rd_data <= 0;
+        bridge_rd_data <= settings_bridge_q;
     end
     32'hF8xxxxxx: begin
         bridge_rd_data <= cmd_bridge_rd_data;
